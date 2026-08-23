@@ -1,0 +1,6 @@
+Added the AI Provider model, which records a remote LLM endpoint and references a Nautobot External Integration for its URL, headers, TLS settings, timeout, and credentials.
+Added the AI Model model, which records a single model offered by an AI Provider, with an enabled flag and optional num_predict and temperature overrides that fall back to the provider default.
+Added UI list, detail, edit, and bulk views, filtersets, forms, and tables for both models.
+Added a shared top-level "AI Tools" navigation tab, so that other AI-related apps can add their own menu groups beside this one.
+Added REST API endpoints at /api/plugins/ai-models/providers/ and /api/plugins/ai-models/ai-models/.
+Added the Discover AI Models Job, which reads GET /v1/models from each OpenAI-compatible provider and creates or updates AI Model records without ever deleting one.

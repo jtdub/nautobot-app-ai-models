@@ -1,0 +1,30 @@
+{
+    "cookiecutter": {
+        "codeowner_github_usernames": "@jtdub",
+        "full_name": "James Williams",
+        "email": "james.williams@jtdub.com",
+        "github_org": "jtdub",
+        "app_name": "nautobot_ai_models",
+        "verbose_name": "AI Models",
+        "app_slug": "ai-models",
+        "project_slug": "nautobot-app-ai-models",
+        "repo_url": "https://github.com/jtdub/nautobot-app-ai-models",
+        "base_url": "ai-models",
+        "camel_name": "AIModels",
+        "project_short_description": "Nautobot app that catalogs LLM providers and models.",
+        "model_class_name": "Provider",
+        "open_source_license": "Apache-2.0",
+        "docs_base_url": "https://nautobot-ai-models.readthedocs.io",
+        "docs_app_url": "https://nautobot-ai-models.readthedocs.io/en/latest",
+        "__commercial": false,
+        "_extensions": [
+            "local_extensions.camel_case_to_kebab",
+            "local_extensions.camel_case_to_words",
+            "local_extensions.NautobotVersions"
+        ],
+        "_template": "https://github.com/nautobot/cookiecutter-nautobot-app.git",
+        "_output_dir": "/Users/jtdub/Documents/code",
+        "_repo_dir": "/Users/jtdub/.cookiecutters/cookiecutter-nautobot-app/nautobot-app",
+        "_checkout": "nautobot-app-v3.1.4"
+    }
+}

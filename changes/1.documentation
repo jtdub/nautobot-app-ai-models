@@ -1,0 +1,3 @@
+Added documentation screenshots of the AI Providers list, the AI Provider detail view, the AI Models list, the add form, the embedded External Integration modal, the discovery job result, and the AI Tools navigation tab.
+Added development/bin/take_screenshots.py, a Playwright script that recaptures every documentation screenshot from a running development instance.
+Added a guide for other AI apps on joining the shared "AI Tools" navigation tab.
