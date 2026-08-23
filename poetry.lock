@@ -6282,4 +6282,4 @@ discovery = ["httpx2", "mcp"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.15"
-content-hash = "1119c752252a86bce62c268914b8d3ab2d930e914f8cb6db01e8079e0df58192"
+content-hash = "ece50dba42c968d07feb80f41898dca95c82107eb9695b420615f19eb1ab54a3"
