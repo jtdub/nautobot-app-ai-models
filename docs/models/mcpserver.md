@@ -18,7 +18,7 @@ it points at, which is also where the TLS settings and the timeout come from.
 | `name` | string | What this server is called in Nautobot. Unique. Not the name the server reports for itself. |
 | `description` | string | What the server is for, in an operator's words. |
 | `external_integration` | foreign key | The endpoint URL, its headers and TLS settings, and its secrets group. Required. |
-| `transport` | choice | `streamable-http`, `sse` (deprecated), or `stdio`. A stdio server cannot be discovered from Nautobot. |
+| `transport` | choice | `streamable-http`, `sse` (deprecated), or `stdio`. Discovery reads a `streamable-http` server only. It skips the other two and says so, because a stdio server is a subprocess of its client and this app speaks no SSE. Register their tools by hand. |
 | `enabled` | boolean | Whether the server is in service. A disabled server is skipped by discovery and is meant to be skipped by any app reading this registry. |
 | `tenant` | foreign key | The tenant this server belongs to, if the deployment is divided that way. Optional. |
 | `tags` | tags | Standard Nautobot tags. |

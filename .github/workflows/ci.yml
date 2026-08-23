@@ -165,7 +165,9 @@ jobs:
       fail-fast: true
       matrix:
         python-version: ["3.10"]
-        nautobot-version: ["3.1.0"]
+        # Both ends of the supported range. Migration drift only shows up on the version whose
+        # migration graph the app's own migration was not generated against.
+        nautobot-version: ["3.1.0", "stable"]
     env:
       INVOKE_NAUTOBOT_AI_MODELS_PYTHON_VER: "${{ matrix.python-version }}"
       INVOKE_NAUTOBOT_AI_MODELS_NAUTOBOT_VER: "${{ matrix.nautobot-version }}"

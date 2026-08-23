@@ -9,8 +9,19 @@ MAX_TEMPERATURE = 2
 TEMPERATURE_MAX_DIGITS = 4
 TEMPERATURE_DECIMAL_PLACES = 2
 
+# Token pricing. Four decimal places because a cheap model is quoted in fractions of a cent per
+# million tokens, and twelve digits because nothing real approaches that and rounding a price
+# is worse than storing a wide column.
+COST_MAX_DIGITS = 12
+COST_DECIMAL_PLACES = 4
+MIN_COST = 0
+
 # The de facto standard model-discovery endpoint for OpenAI-compatible providers.
 MODELS_ENDPOINT = "/v1/models"
+
+# Applied when an ExternalIntegration carries no usable timeout. It accepts 0, and a request
+# with a timeout of 0 fails at once with an error that says nothing about why.
+DEFAULT_TIMEOUT_SECONDS = 30
 
 # --------------------------------------------------------------------------------------------
 # MCP field groupings, shared across the form, table, and detail-view layers.

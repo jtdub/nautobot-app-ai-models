@@ -12,7 +12,7 @@
         "base_url": "ai-models",
         "camel_name": "AIModels",
         "project_short_description": "Nautobot app that catalogs LLM providers and models.",
-        "model_class_name": "Provider",
+        "model_class_name": "AIProvider",
         "open_source_license": "Apache-2.0",
         "docs_base_url": "https://nautobot-ai-models.readthedocs.io",
         "docs_app_url": "https://nautobot-ai-models.readthedocs.io/en/latest",

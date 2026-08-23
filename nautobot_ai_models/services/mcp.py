@@ -15,8 +15,8 @@ onto the registry. The rules it holds to:
   that a client treat annotations as untrusted, and deciding "this tool is safe" from the claim of
   the server the claim describes is exactly the decision it forbids.
 
-Ported from the equivalent module in nautobot-app-event-tracker, which has run this path against
-real servers. The tool-calling half is deliberately absent.
+Moved here from nautobot-app-mcp-models when the two registries merged into one app. The
+tool-calling half is deliberately absent.
 """
 
 import asyncio
@@ -31,15 +31,12 @@ from django.utils import timezone
 from nautobot.apps.choices import SecretsGroupSecretTypeChoices
 
 from nautobot_ai_models.choices import MCPTransportChoices
+from nautobot_ai_models.constants import DEFAULT_TIMEOUT_SECONDS
 from nautobot_ai_models.models import MCPTool
 from nautobot_ai_models.secrets import read_secret
 from nautobot_ai_models.services.exceptions import MCPCallError, MCPConfigurationError
 
 logger = logging.getLogger(__name__)
-
-#: Applied when the integration says nothing. Discovery wants a bound; this is the one it gets when
-#: nobody chose.
-DEFAULT_TIMEOUT_SECONDS = 30
 
 #: How long the read side of a session may wait. The transport keeps a server-sent-event stream
 #: open, so the read deadline is not the request deadline and must not be set from it. Matches what
@@ -55,12 +52,14 @@ MAX_TOOL_PAGES = 50
 #: that header on the integration, and this defers to them.
 AUTHORIZATION_HEADER = "Authorization"
 
-#: Transports this app can open from a Nautobot worker. A stdio server is a subprocess of its
-#: client, so there is nothing for a worker to connect to.
-DISCOVERABLE_TRANSPORTS = (
-    MCPTransportChoices.TYPE_STREAMABLE_HTTP,
-    MCPTransportChoices.TYPE_SSE,
-)
+#: Transports this app can open from a Nautobot worker.
+#:
+#: A stdio server is a subprocess of its client, so there is nothing for a worker to connect
+#: to. HTTP+SSE is absent for a different reason: this module speaks streamable HTTP and only
+#: streamable HTTP, so listing SSE here would send every such server through a client that
+#: cannot talk to it, and the operator would get an opaque failure instead of the skip notice
+#: that tells them to enter the tools by hand.
+DISCOVERABLE_TRANSPORTS = (MCPTransportChoices.TYPE_STREAMABLE_HTTP,)
 
 
 @dataclass(frozen=True)
@@ -225,15 +224,22 @@ def discover(server, *, remove_stale=False, client=None):
 
 
 def _cause(error, _depth=0):
-    """A message naming what actually went wrong, not the wrapper that carried it.
+    """The exception types naming what actually went wrong, not the wrapper that carried them.
 
     The MCP client runs on anyio task groups, so a DNS failure or a refused connection reaches this
     module as `unhandled errors in a TaskGroup (1 sub-exception)`. That sentence tells an operator
     nothing, and it is the sentence they get in the Job log. This digs out the real exceptions.
+
+    Only the type name is returned. An HTTP client's own message embeds the request URL, and a
+    remote URL is free text that an operator may well have written a credential into, as
+    `https://user:password@host/mcp` or as a token query parameter. That message ends up in a
+    JobLogEntry, which every holder of `extras.view_jobresult` can read - a wider audience than
+    the one that may read the Secrets Group the credential came from. The status code and the type
+    are what an operator needs; the URL they already know.
     """
     inner = getattr(error, "exceptions", None)
     if not inner or _depth >= 5:
-        return f"{type(error).__name__}: {error}" if str(error) else type(error).__name__
+        return type(error).__name__
     return "; ".join(_cause(sub, _depth + 1) for sub in inner)
 
 
@@ -250,7 +256,14 @@ def _record_server_info(server, info):
     server.instructions = info.instructions or ""
     server.capabilities = info.capabilities or {}
     server.last_discovered_at = timezone.now()
-    server.validated_save()
+
+    # Every value above is self-reported by an unverified party and lands in a bounded column. A
+    # server reporting a 300-character name must fail this one server, not raise out of the job
+    # and skip every server after it.
+    try:
+        server.validated_save()
+    except (ValidationError, IntegrityError) as error:
+        raise MCPCallError(f"'{server}' reported metadata this registry cannot hold: {error}") from error
 
 
 def _reconcile(server, advertised, *, remove_stale=False):
@@ -373,10 +386,13 @@ def _retire(stale, *, remove_stale):
             deleted.append(str(tool))
             tool.delete()
             continue
+        # Only a tool this run turned off. A tool disabled by an earlier run is already known,
+        # and re-reporting it nightly forever trains an operator to ignore the one warning that
+        # is meant to say something changed.
         if tool.enabled:
             tool.enabled = False
             tool.validated_save()
-        disabled.append(tool)
+            disabled.append(tool)
     return tuple(disabled), tuple(deleted)
 
 
@@ -449,6 +465,42 @@ def _as_dict(value):
     return {}
 
 
+def _redirect_safe_client_class(base_class, protected_headers):
+    """An HTTP client that drops the integration's headers on a cross-origin redirect.
+
+    The session has to follow a redirect, because an endpoint sending `/mcp` to `/mcp/` is
+    ordinary and the SDK's own client factory allows it. But the headers on this client are the
+    integration's, and `connection_for` puts whatever header an operator chose to authenticate
+    with among them. An HTTP client strips only `Authorization` when the origin changes, so a
+    server answering `302 Location: https://elsewhere/` would be handed an `X-Api-Key` verbatim.
+
+    Returns None when the client library does not expose the hook this relies on. The caller then
+    refuses to follow redirects at all, which fails loudly rather than quietly leaking.
+    """
+    if not hasattr(base_class, "_redirect_headers"):
+        return None
+
+    lowered = {name.lower() for name in protected_headers}
+
+    class _RedirectSafeClient(base_class):  # pylint: disable=too-few-public-methods
+        """Strip the integration's headers whenever a redirect leaves the origin."""
+
+        def _redirect_headers(self, request, url, method):
+            headers = super()._redirect_headers(request, url, method)
+            same_origin = (url.scheme, url.host, url.port) == (
+                request.url.scheme,
+                request.url.host,
+                request.url.port,
+            )
+            if not same_origin:
+                for name in list(headers.keys()):
+                    if name.lower() in lowered:
+                        del headers[name]
+            return headers
+
+    return _RedirectSafeClient
+
+
 class _StreamableHTTPClient:  # pylint: disable=too-few-public-methods
     """The real client: one MCP session per discovery pass, over HTTP and nothing else.
 
@@ -507,9 +559,19 @@ class _StreamableHTTPClient:  # pylint: disable=too-few-public-methods
 
     def _run(self, connection, operation):
         """Open a session, do one thing, close it."""
+        # Redirects are allowed only while the integration's headers can be stripped when the
+        # origin changes. See `_redirect_safe_client_class`.
+        client_class = _redirect_safe_client_class(self._http_client_class, connection.headers)
+        follow_redirects = client_class is not None
+        if client_class is None:
+            client_class = self._http_client_class
+            logger.warning(
+                "The HTTP client does not expose its redirect hook, so redirects will not be "
+                "followed. A server that redirects its endpoint cannot be discovered."
+            )
 
         async def _once():
-            async with self._http_client_class(
+            async with client_class(
                 headers=connection.headers,
                 verify=connection.verify,
                 # Not a flat timeout. The SDK's own client factory documents why: the read side of
@@ -524,7 +586,7 @@ class _StreamableHTTPClient:  # pylint: disable=too-few-public-methods
                 ),
                 # An endpoint that redirects `/mcp` to `/mcp/` is ordinary, and without this the
                 # session simply fails. The SDK's factory sets it for the same reason.
-                follow_redirects=True,
+                follow_redirects=follow_redirects,
             ) as http_client:
                 async with self._transport(connection.url, http_client=http_client) as (read, write):
                     async with self._session_class(read, write, read_timeout_seconds=connection.timeout) as session:
@@ -583,6 +645,6 @@ def _default_client():
             "The MCP client could not be imported, so no server can be discovered: "
             f"{type(error).__name__}: {error}. "
             "If it is not installed, install the app with the 'discovery' extra: "
-            "nautobot-mcp-models[discovery]."
+            "nautobot-ai-models[discovery]."
         ) from error
     return _StreamableHTTPClient(ClientSession, streamable_http_client, httpx2.AsyncClient, httpx2.Timeout)

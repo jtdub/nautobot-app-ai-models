@@ -80,6 +80,8 @@ class AIModelTable(BaseTable):
             "enabled",
             "num_predict",
             "temperature",
+            "input_cost_per_million",
+            "output_cost_per_million",
             "actions",
         )
         default_columns = (

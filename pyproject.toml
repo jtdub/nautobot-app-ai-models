@@ -32,6 +32,10 @@ python = ">=3.10,<3.15"
 # Used for local development
 nautobot = ">=3.1.0,<4.0.0"
 
+# Imported directly by discovery.py for the AI model catalog request. Nautobot pulls it in
+# too, but a required runtime import belongs in this file rather than relying on that.
+requests = ">=2.31,<3.0"
+
 # The MCP client, used only by the MCP Server Discovery job. Optional and imported lazily so an
 # operator who wants nothing but the models installs nothing extra.
 mcp = { version = ">=2.0.0,<3.0.0", optional = true }

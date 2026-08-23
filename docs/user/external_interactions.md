@@ -39,11 +39,15 @@ The request settings all come from the provider's External Integration:
 |---|---|
 | Request | An MCP `initialize` handshake, then `tools/list`, paged |
 | Trigger | The **MCP Server Discovery** Job, run by a user or on a schedule |
-| Target | Every enabled MCP Server whose transport a worker can open |
+| Target | Every enabled MCP Server whose transport is `streamable-http` |
 | Response | The server's capabilities, its own metadata, and its tool definitions |
 
-A `stdio` server is a subprocess of its client, so a Nautobot worker cannot reach one. Discovery
-skips it and says so. Register its tools by hand.
+A `stdio` server is a subprocess of its client, so a Nautobot worker cannot reach one, and this
+app speaks no HTTP+SSE. Discovery skips both and says so. Register their tools by hand.
+
+Neither job follows an HTTP redirect to another origin while carrying the integration's
+headers. A credential belongs to the host it was configured for, and a redirect is that host
+naming another one.
 
 This job needs the optional `discovery` extra, which brings the MCP client library:
 

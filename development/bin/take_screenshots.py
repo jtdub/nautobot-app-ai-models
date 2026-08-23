@@ -50,6 +50,7 @@ LIST_VIEWS = (
 #: Detail views. Each entry is a name, a list path, and the search term that picks the row.
 DETAIL_VIEWS = (
     ("ai-provider-detail", "/plugins/ai-models/ai-providers/", "Ollama Lab"),
+    ("ai-model-detail", "/plugins/ai-models/ai-models/", "gpt-4o-mini"),
     ("mcp-server-detail", "/plugins/ai-models/mcp-servers/", "Nautobot MCP"),
     ("mcp-tool-detail", "/plugins/ai-models/mcp-tools/", "get_device"),
 )

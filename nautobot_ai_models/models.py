@@ -20,7 +20,10 @@ from nautobot.apps.models import OrganizationalModel, PrimaryModel, extras_featu
 
 from nautobot_ai_models.choices import MCPTransportChoices
 from nautobot_ai_models.constants import (
+    COST_DECIMAL_PLACES,
+    COST_MAX_DIGITS,
     MAX_TEMPERATURE,
+    MIN_COST,
     MIN_NUM_PREDICT,
     MIN_TEMPERATURE,
     TEMPERATURE_DECIMAL_PLACES,
@@ -126,6 +129,30 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
         validators=[MinValueValidator(MIN_TEMPERATURE), MaxValueValidator(MAX_TEMPERATURE)],
         help_text="Overrides the provider default. Leave empty to inherit.",
     )
+    input_cost_per_million = models.DecimalField(
+        max_digits=COST_MAX_DIGITS,
+        decimal_places=COST_DECIMAL_PLACES,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(MIN_COST)],
+        verbose_name="Input cost per million tokens",
+        help_text=(
+            "What a million input tokens cost, in the provider's billing currency. Empty means "
+            "nobody has recorded a price, which is not the same as free."
+        ),
+    )
+    output_cost_per_million = models.DecimalField(
+        max_digits=COST_MAX_DIGITS,
+        decimal_places=COST_DECIMAL_PLACES,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(MIN_COST)],
+        verbose_name="Output cost per million tokens",
+        help_text=(
+            "What a million output tokens cost, in the provider's billing currency. Usually "
+            "several times the input price, which is why the two are recorded apart."
+        ),
+    )
 
     class Meta:
         """Meta class."""
@@ -167,6 +194,10 @@ class MCPServer(PrimaryModel):  # pylint: disable=too-many-ancestors
     integration, transport, enabled, and tenant. The discovery job owns everything from
     ``protocol_version`` down, and rewrites those on every successful run.
     """
+
+    # This app catalogs servers. It does not group them, so opt out of Dynamic Groups, as the two
+    # AI models do.
+    is_dynamic_group_associable_model = False
 
     name = models.CharField(
         max_length=CHARFIELD_MAX_LENGTH,
@@ -281,6 +312,9 @@ class MCPTool(OrganizationalModel):  # pylint: disable=too-many-ancestors
     client treat a server's own annotations as untrusted, so discovery records the claim and never
     acts on it.
     """
+
+    # This app catalogs tools. It does not group them, so opt out of Dynamic Groups.
+    is_dynamic_group_associable_model = False
 
     mcp_server = models.ForeignKey(
         to=MCPServer,

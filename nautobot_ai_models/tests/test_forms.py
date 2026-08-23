@@ -1,14 +1,16 @@
 """Test the AIProvider and AIModel forms."""
 
-from django.test import TestCase
+from nautobot.apps.testing import FormTestCases
 
 from nautobot_ai_models import forms, models
 from nautobot_ai_models.choices import MCPTransportChoices
 from nautobot_ai_models.tests import fixtures
 
 
-class AIProviderFormTest(TestCase):
+class AIProviderFormTest(FormTestCases.BaseFormTestCase):
     """Test the AIProvider forms."""
+
+    form_class = forms.AIProviderForm
 
     @classmethod
     def setUpTestData(cls):
@@ -66,8 +68,10 @@ class AIProviderFormTest(TestCase):
         self.assertIn("temperature", form.errors)
 
 
-class AIModelFormTest(TestCase):
+class AIModelFormTest(FormTestCases.BaseFormTestCase):
     """Test the AIModel forms."""
+
+    form_class = forms.AIModelForm
 
     @classmethod
     def setUpTestData(cls):
@@ -103,8 +107,10 @@ class AIModelFormTest(TestCase):
         self.assertIn("This field is required.", form.errors["provider"])
 
 
-class MCPServerFormTest(TestCase):
+class MCPServerFormTest(FormTestCases.BaseFormTestCase):
     """Test MCPServer forms."""
+
+    form_class = forms.MCPServerForm
 
     @classmethod
     def setUpTestData(cls):
@@ -161,8 +167,10 @@ class MCPServerFormTest(TestCase):
         self.assertTrue(form.fields["external_integration"].embedded_create)
 
 
-class MCPToolFormTest(TestCase):
+class MCPToolFormTest(FormTestCases.BaseFormTestCase):
     """Test MCPTool forms."""
+
+    form_class = forms.MCPToolForm
 
     @classmethod
     def setUpTestData(cls):
@@ -194,3 +202,40 @@ class MCPToolFormTest(TestCase):
         """A tool added by hand should be able to create its server without leaving the page."""
         form = forms.MCPToolForm()
         self.assertTrue(form.fields["mcp_server"].embedded_create)
+
+
+class MCPServerBulkEditFormTest(FormTestCases.BaseFormTestCase):
+    """Test MCPServerBulkEditForm.
+
+    Nautobot's bulk-update mixin applies any value that is not None or empty, so a select with no
+    blank option rewrites the field on every selected row. That is data loss, not a cosmetic
+    problem: `transport` is what discovery gates on.
+    """
+
+    form_class = forms.MCPServerBulkEditForm
+
+    @classmethod
+    def setUpTestData(cls):
+        """Three servers, one per transport."""
+        cls.servers = fixtures.create_mcpserver()
+
+    def test_transport_offers_a_blank_choice(self):
+        """Leaving transport alone has to be expressible."""
+        # A bulk edit form takes the model it edits as its first argument.
+        choices = forms.MCPServerBulkEditForm(models.MCPServer).fields["transport"].choices
+        # Nautobot's bulk-update mixin treats None and the empty string alike as "leave it".
+        blanks = [value for value, _ in choices if value in (None, "")]
+        self.assertTrue(blanks, f"transport offers no blank choice: {list(choices)}")
+
+    def test_leaving_transport_blank_is_valid_and_changes_nothing(self):
+        """A bulk edit that only sets a description must not touch transport."""
+        form = forms.MCPServerBulkEditForm(
+            models.MCPServer,
+            data={
+                "pk": [server.pk for server in self.servers],
+                "description": "Bulk edited",
+                "transport": "",
+            },
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["transport"], "")

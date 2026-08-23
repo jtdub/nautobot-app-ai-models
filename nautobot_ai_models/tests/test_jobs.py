@@ -264,3 +264,19 @@ class MCPServerDiscoveryJobTest(TransactionTestCase):
         messages = " ".join(self._log_messages(result))
         self.assertIn("brand_new", messages)
         self.assertIn("moved_underneath_us", messages)
+
+    @mock.patch("nautobot_ai_models.jobs.mcp.require_client", mock.Mock())
+    @mock.patch("nautobot_ai_models.jobs.mcp.discover")
+    def test_a_failure_never_writes_the_endpoint_into_the_log(self, discover):
+        """An HTTP client's own message embeds the request URL, and a remote URL may carry a secret.
+
+        The job log is readable by every holder of `extras.view_jobresult`, which is a wider
+        audience than the one that may read the Secrets Group the credential came from.
+        """
+        discover.side_effect = MCPCallError("HTTPStatusError: 401 for https://svc:hunter2@mcp.internal/mcp")
+
+        result = self._run(mcp_server=str(self.servers[0].pk))
+
+        messages = " ".join(self._log_messages(result))
+        self.assertNotIn("hunter2", messages)
+        self.assertNotIn("svc:", messages)

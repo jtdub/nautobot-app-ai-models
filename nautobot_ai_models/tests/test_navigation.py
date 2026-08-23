@@ -8,8 +8,8 @@ visible.
 from pathlib import Path
 
 from django.contrib.staticfiles import finders
-from django.test import TestCase
 from django.urls import reverse
+from nautobot.apps.testing import TestCase
 
 from nautobot_ai_models import navigation
 from nautobot_ai_models.constants import (

@@ -11,6 +11,7 @@ list and do not pass `embedded_create=False` on the field: either one takes the 
 from django import forms
 from nautobot.apps.constants import CHARFIELD_MAX_LENGTH
 from nautobot.apps.forms import (
+    BulkEditNullBooleanSelect,
     DynamicModelChoiceField,
     DynamicModelMultipleChoiceField,
     NautobotBulkEditForm,
@@ -19,6 +20,7 @@ from nautobot.apps.forms import (
     StaticSelect2,
     StaticSelect2Multiple,
     TagsBulkEditFormMixin,
+    add_blank_choice,
 )
 from nautobot.extras.models import ExternalIntegration
 from nautobot.tenancy.models import Tenant
@@ -30,6 +32,16 @@ from nautobot_ai_models.constants import (
     MCP_TOOL_DEFINITION_FIELDS,
     MCP_TOOL_SCHEMA_FIELDS,
 )
+
+
+def _boolean_select():
+    """A three-state Yes/No/any widget, built fresh so no two fields share one instance.
+
+    `BulkEditNullBooleanSelect` is what Nautobot uses for exactly this, on a bulk-edit form and
+    on a filter form alike. Built per field rather than shared, because a Django widget
+    instance belongs to one field.
+    """
+    return BulkEditNullBooleanSelect()
 
 
 class AIProviderForm(NautobotModelForm):  # pylint: disable=too-many-ancestors
@@ -63,7 +75,11 @@ class AIProviderBulkEditForm(NautobotBulkEditForm):  # pylint: disable=too-many-
         required=False,
         label="External Integration",
     )
-    openai_compatible = forms.NullBooleanField(required=False, label="OpenAI-compatible")
+    openai_compatible = forms.NullBooleanField(
+        required=False,
+        label="OpenAI-compatible",
+        widget=_boolean_select(),
+    )
     num_predict = forms.IntegerField(required=False, label="Default num_predict")
     temperature = forms.DecimalField(required=False, label="Default temperature")
 
@@ -94,7 +110,11 @@ class AIProviderFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ance
         required=False,
         label="External Integration",
     )
-    openai_compatible = forms.NullBooleanField(required=False, label="OpenAI-compatible")
+    openai_compatible = forms.NullBooleanField(
+        required=False,
+        label="OpenAI-compatible",
+        widget=_boolean_select(),
+    )
 
 
 class AIModelForm(NautobotModelForm):  # pylint: disable=too-many-ancestors
@@ -122,9 +142,11 @@ class AIModelBulkEditForm(NautobotBulkEditForm):  # pylint: disable=too-many-anc
         label="AI Provider",
     )
     description = forms.CharField(required=False, max_length=CHARFIELD_MAX_LENGTH)
-    enabled = forms.NullBooleanField(required=False)
+    enabled = forms.NullBooleanField(required=False, widget=_boolean_select())
     num_predict = forms.IntegerField(required=False)
     temperature = forms.DecimalField(required=False)
+    input_cost_per_million = forms.DecimalField(required=False, label="Input cost per million tokens")
+    output_cost_per_million = forms.DecimalField(required=False, label="Output cost per million tokens")
 
     class Meta:
         """Meta attributes."""
@@ -133,6 +155,8 @@ class AIModelBulkEditForm(NautobotBulkEditForm):  # pylint: disable=too-many-anc
             "description",
             "num_predict",
             "temperature",
+            "input_cost_per_million",
+            "output_cost_per_million",
         ]
 
 
@@ -153,21 +177,7 @@ class AIModelFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancesto
         required=False,
         label="AI Provider",
     )
-    enabled = forms.NullBooleanField(required=False)
-
-
-#: The three-state widget choices for a NullBooleanField filter. Nautobot has an identical constant,
-#: but it is not exported from `nautobot.apps.*`, and this app imports from the public surface only.
-BOOLEAN_WITH_BLANK_CHOICES = (
-    ("", "---------"),
-    ("True", "Yes"),
-    ("False", "No"),
-)
-
-
-def _boolean_select():
-    """A three-state Yes/No/any widget, built fresh so no two fields share one instance."""
-    return StaticSelect2(choices=BOOLEAN_WITH_BLANK_CHOICES)
+    enabled = forms.NullBooleanField(required=False, widget=_boolean_select())
 
 
 class MCPServerForm(NautobotModelForm):  # pylint: disable=too-many-ancestors
@@ -192,7 +202,14 @@ class MCPServerBulkEditForm(TagsBulkEditFormMixin, NautobotBulkEditForm):  # pyl
 
     pk = forms.ModelMultipleChoiceField(queryset=models.MCPServer.objects.all(), widget=forms.MultipleHiddenInput)
     description = forms.CharField(required=False, max_length=CHARFIELD_MAX_LENGTH)
-    transport = forms.ChoiceField(choices=MCPTransportChoices, required=False, widget=StaticSelect2)
+    # `add_blank_choice` is not cosmetic. Nautobot's bulk-update mixin applies any value that
+    # is not None or empty, so a select with no blank option posts its first choice every time
+    # and quietly rewrites `transport` on every selected server.
+    transport = forms.ChoiceField(
+        choices=add_blank_choice(MCPTransportChoices),
+        required=False,
+        widget=StaticSelect2,
+    )
     enabled = forms.NullBooleanField(required=False, widget=_boolean_select())
     tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
 

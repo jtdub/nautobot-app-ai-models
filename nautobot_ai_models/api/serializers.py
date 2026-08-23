@@ -68,8 +68,12 @@ class MCPToolSerializer(NautobotModelSerializer):  # pylint: disable=too-many-an
         model = models.MCPTool
         fields = "__all__"
 
-        # Everything discovery owns. `enabled` and `writable` are deliberately absent: those are
-        # the two an operator sets, and setting them over the API is a supported thing to do.
+        # Discovery's own evidence of what it saw and when. A client that could rewrite either
+        # could make the registry claim a review is current when it is not.
+        #
+        # The rest of what discovery writes - title, description, both schemas, and
+        # advertised_read_only - stays writable on purpose. A stdio server cannot be reached
+        # from a worker, so its tools are entered and corrected by hand.
         read_only_fields = [
             "definition_fingerprint",
             "last_seen_at",

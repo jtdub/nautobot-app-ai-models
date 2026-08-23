@@ -5,7 +5,8 @@ the answer onto the registry. Neither grants anything, and neither deletes a rec
 is told to.
 """
 
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.db import IntegrityError
 from nautobot.apps.exceptions import SecretError
 from nautobot.apps.jobs import BooleanVar, Job, ObjectVar, register_jobs
 
@@ -78,7 +79,19 @@ class DiscoverAIModels(Job):
             )
             return
 
-        created, updated = self.sync_models(provider, discovered, enable_new_models)
+        try:
+            created, updated = self.sync_models(provider, discovered, enable_new_models)
+        except (ValidationError, IntegrityError) as error:
+            # Every name here came from an unverified endpoint and lands in a bounded column.
+            # A provider offering a 300-character model id must fail this one provider, not
+            # raise out of run() and skip every provider after it.
+            self.logger.failure(
+                "This provider offered a model this registry cannot hold: %s",
+                type(error).__name__,
+                extra={"object": provider},
+            )
+            return
+
         self.report_missing(provider, discovered)
         self.logger.success(
             "Discovery complete. Found %d models. Created %d. Updated %d.",
@@ -154,8 +167,13 @@ class MCPServerDiscovery(Job):
         # No job input carries a credential: they come from each server's secrets group at
         # connection time. False so this job can be scheduled, which is the point of it.
         has_sensitive_variables = False
+        # One session may hold a server-sent-event stream open for SSE_READ_TIMEOUT_SECONDS,
+        # so a run over several servers needs more headroom than Celery's default gives it.
+        # Being killed part way through defeats the whole point of continuing past a failure.
+        soft_time_limit = 1800
+        time_limit = 2100
 
-    def run(self, mcp_server=None, remove_stale=False):  # pylint: disable=arguments-differ
+    def run(self, *, mcp_server=None, remove_stale=False):  # pylint: disable=arguments-differ
         """Discover one server, or every enabled one, and report what moved."""
         servers = self._targets(mcp_server)
         if not servers:

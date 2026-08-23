@@ -19,15 +19,16 @@ class AIModelsConfig(NautobotAppConfig):
     description = "Nautobot app that catalogs LLM providers, LLM models, MCP servers, and MCP tools."
     base_url = "ai-models"
     min_version = "3.1.0"
-    max_version = "3.9.99"
+    max_version = "3.99.99"
     required_settings = []
     default_settings = {}
     docs_view_name = "plugins:nautobot_ai_models:docs"
     searchable_models = ["aiprovider", "aimodel", "mcpserver", "mcptool"]
 
-    # Nautobot reads this through getattr() in nautobot.core.utils.config.get_nautobot_edition().
-    # NautobotEditionChoices lives in nautobot.core.choices, which is not part of the public
-    # nautobot.apps API, so declare the value as a literal. Valid values are "community",
+    # Read through getattr() by nautobot.core.utils.config.get_nautobot_edition(), which
+    # arrived in Nautobot 3.2. On the 3.1 floor this attribute is simply unread, which is
+    # harmless. NautobotEditionChoices lives in nautobot.core.choices and is not part of the
+    # public nautobot.apps API, so the value is a literal. The set is "community",
     # "professional", "enterprise", and "cloud".
     nautobot_edition = "community"
 

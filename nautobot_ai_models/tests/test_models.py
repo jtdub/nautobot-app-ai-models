@@ -97,6 +97,35 @@ class TestAIModel(ModelTestCases.BaseModelTestCase):
         self.assertEqual(ai_model.resolved_num_predict, 1024)
         self.assertEqual(str(ai_model.resolved_temperature), "1.20")
 
+    def test_cost_is_recorded_per_model_and_defaults_to_unknown(self):
+        """An empty price means nobody recorded one. It does not mean free."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        self.assertIsNone(ai_model.input_cost_per_million)
+        self.assertIsNone(ai_model.output_cost_per_million)
+
+        ai_model.input_cost_per_million = "2.5000"
+        ai_model.output_cost_per_million = "10.0000"
+        ai_model.validated_save()
+
+        ai_model.refresh_from_db()
+        self.assertEqual(str(ai_model.input_cost_per_million), "2.5000")
+        self.assertEqual(str(ai_model.output_cost_per_million), "10.0000")
+
+    def test_a_negative_cost_is_rejected(self):
+        """A price below zero is a typo, not a rebate."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        ai_model.input_cost_per_million = "-1.0000"
+        with self.assertRaises(ValidationError):
+            ai_model.validated_save()
+
+    def test_a_fraction_of_a_cent_survives(self):
+        """A cheap model is quoted in fractions of a cent per million tokens."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        ai_model.input_cost_per_million = "0.0001"
+        ai_model.validated_save()
+        ai_model.refresh_from_db()
+        self.assertEqual(str(ai_model.input_cost_per_million), "0.0001")
+
     def test_name_is_unique_per_provider(self):
         """The same model name may exist under two different providers."""
         other = models.AIProvider.objects.get(name="Test Three")

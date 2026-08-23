@@ -84,6 +84,17 @@ ai_model.resolved_temperature
 Clear the **Enabled** checkbox. The record stays, its history stays, and the discovery job leaves
 the flag alone. Consumers should skip a disabled model.
 
+### Record what a model costs
+
+Set **Input cost per million tokens** and **Output cost per million tokens** on the model, so
+that a consumer can price a call before it makes one, or account for one afterwards. Output is
+usually several times dearer than input, which is why the two are separate fields.
+
+An empty price means nobody has recorded one. Treat it as unknown, not as free.
+
+![An AI Model detail view](../images/ai-model-detail-light.png#only-light)
+![An AI Model detail view](../images/ai-model-detail-dark.png#only-dark)
+
 ### Browse every model at once
 
 The AI Models list shows every model across every provider. Filter it by provider, by enabled
@@ -104,8 +115,10 @@ state, or by name.
     without losing anything already typed. This needs the `extras.add_externalintegration`
     permission; without it, Nautobot hides the button.
 
-3. Choose the **Transport**. Almost every remote server is `streamable-http`. A `stdio` server runs
-   as a subprocess of its client, so a Nautobot worker cannot reach one and discovery skips it.
+3. Choose the **Transport**. Almost every remote server is `streamable-http`, which is the only
+   transport discovery reads. A `stdio` server runs as a subprocess of its client, so a worker
+   cannot reach one; `sse` is deprecated by the MCP specification and this app speaks none of
+   it. Discovery skips both and says so, and their tools are entered by hand.
 4. Save.
 
 ![The MCP Servers list](../images/mcp-servers-list-light.png#only-light)
@@ -168,6 +181,9 @@ available = AIModel.objects.filter(
 # The effective inference parameters, with the provider default filled in.
 for ai_model in available:
     print(ai_model.name, ai_model.resolved_num_predict, ai_model.resolved_temperature)
+
+# What a million tokens cost. None means nobody recorded a price, not that it is free.
+priced = available.exclude(input_cost_per_million=None)
 ```
 
 ### The MCP registry

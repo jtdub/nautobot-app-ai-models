@@ -2,7 +2,14 @@
 
 No test here opens a socket. The MCP client is injected as a fake through `discover(client=...)`,
 which is the seam that exists for exactly this.
+
+Several of these reach for a private helper on purpose. `_cause` and `_redirect_safe_client_class`
+are where two of this module's security properties actually live - a failure message that cannot
+carry a credentialled URL, and a redirect that cannot carry a credential off the origin - and a
+test that only exercised them through `discover()` would not pin either one.
 """
+
+# pylint: disable=protected-access
 
 from nautobot.apps.choices import SecretsGroupAccessTypeChoices, SecretsGroupSecretTypeChoices
 from nautobot.apps.testing import TestCase
@@ -371,6 +378,12 @@ class ErrorReportingTest(TestCase):
 
     Exercised through `discover()` rather than the helper behind it, because the message an operator
     reads in the Job log is the thing that matters.
+
+    The contract is the exception *types* and nothing else. An HTTP client's own message embeds the
+    request URL, and `ExternalIntegration.remote_url` is free text an operator may well have written
+    a credential into, as `https://user:password@host/mcp` or as a token query parameter. The
+    message ends up in a JobLogEntry, readable by every holder of `extras.view_jobresult` - a wider
+    audience than the one that may read the Secrets Group the credential came from.
     """
 
     @classmethod
@@ -383,8 +396,13 @@ class ErrorReportingTest(TestCase):
             mcp.discover(self.server, client=FakeClient(error=error))
         return str(raised.exception)
 
-    def test_plain_exception_is_named(self):
-        self.assertIn("ValueError: bad url", self._message(ValueError("bad url")))
+    def test_a_plain_exception_is_named_by_type_only(self):
+        """The type says what went wrong. The message is the part that can carry a secret."""
+        message = self._message(ValueError("401 for https://svc:hunter2@mcp.internal/mcp"))
+        self.assertIn("ValueError", message)
+        self.assertNotIn("hunter2", message)
+        self.assertNotIn("svc:", message)
+        self.assertNotIn("mcp.internal", message)
 
     def test_exception_group_is_unwrapped(self):
         """The MCP client runs on task groups, so the real cause arrives nested.
@@ -395,14 +413,21 @@ class ErrorReportingTest(TestCase):
         message = self._message(
             ExceptionGroup("unhandled errors in a TaskGroup", [OSError("Name or service not known")])
         )
-        self.assertIn("OSError: Name or service not known", message)
+        self.assertIn("OSError", message)
         self.assertNotIn("sub-exception", message)
 
     def test_every_cause_in_a_group_is_reported(self):
         """A task group can fail more than one way at once, and both are worth seeing."""
         message = self._message(ExceptionGroup("group", [OSError("refused"), TimeoutError("timed out")]))
-        self.assertIn("refused", message)
-        self.assertIn("timed out", message)
+        self.assertIn("OSError", message)
+        self.assertIn("TimeoutError", message)
+
+    def test_a_nested_group_cannot_smuggle_a_message_out(self):
+        """Redaction has to hold at every depth, not only the top one."""
+        error = ExceptionGroup("wrapper", [ExceptionGroup("inner", [ValueError("token=abc123")])])
+        message = self._message(error)
+        self.assertIn("ValueError", message)
+        self.assertNotIn("abc123", message)
 
     def test_nesting_is_bounded(self):
         """A deeply nested group must not recurse without end inside a worker."""
@@ -415,3 +440,89 @@ class ErrorReportingTest(TestCase):
     def test_the_server_is_named(self):
         """One failure among twenty servers has to say which one."""
         self.assertIn(self.server.name, self._message(OSError("refused")))
+
+
+class DiscoverableTransportsTest(TestCase):
+    """Test that the transports the job attempts are the ones the client can actually open."""
+
+    def test_only_streamable_http_is_attempted(self):
+        """This module speaks streamable HTTP and nothing else.
+
+        Listing another transport here sends its servers through a client that cannot talk to
+        them, and the operator gets an opaque failure instead of the skip notice that tells them
+        to enter the tools by hand.
+        """
+        self.assertEqual(mcp.DISCOVERABLE_TRANSPORTS, (MCPTransportChoices.TYPE_STREAMABLE_HTTP,))
+        self.assertNotIn(MCPTransportChoices.TYPE_SSE, mcp.DISCOVERABLE_TRANSPORTS)
+        self.assertNotIn(MCPTransportChoices.TYPE_STDIO, mcp.DISCOVERABLE_TRANSPORTS)
+
+
+class RedirectSafeClientTest(TestCase):
+    """Test that a redirect off the origin cannot carry the integration's credential with it."""
+
+    class FakeURL:  # pylint: disable=too-few-public-methods
+        """The three attributes the origin comparison reads."""
+
+        def __init__(self, scheme, host, port):
+            self.scheme = scheme
+            self.host = host
+            self.port = port
+
+    class FakeRequest:  # pylint: disable=too-few-public-methods
+        """A request carrying only its URL."""
+
+        def __init__(self, url):
+            self.url = url
+
+    class FakeBase:  # pylint: disable=too-few-public-methods
+        """Stands in for the HTTP client, returning the headers a real one would keep."""
+
+        def __init__(self, headers):
+            self._headers = headers
+
+        def _redirect_headers(self, request, url, method):  # pylint: disable=unused-argument
+            # A real client strips Authorization across origins and keeps everything else,
+            # including headers it set itself rather than taking from the integration.
+            return {**self._headers, "User-Agent": "nautobot"}
+
+    #: What `connection_for` put on the client. Any one of these may be the credential, because
+    #: an operator authenticates with whatever header their server expects.
+    HEADERS = {"Authorization": "Bearer t", "X-Api-Key": "secret", "Accept": "application/json"}
+
+    def build(self):
+        """A client class that strips this app's configured headers off-origin."""
+        return mcp._redirect_safe_client_class(self.FakeBase, self.HEADERS)
+
+    def test_a_cross_origin_redirect_drops_every_configured_header(self):
+        """An operator may authenticate with a header of any name, and it must not travel."""
+        client = self.build()(self.HEADERS)
+        headers = client._redirect_headers(
+            self.FakeRequest(self.FakeURL("https", "mcp.internal", 443)),
+            self.FakeURL("https", "attacker.example", 443),
+            "GET",
+        )
+        # Every header the integration supplied goes, not only the one that looks like a
+        # credential. Which of them is the credential is the operator's choice, not ours.
+        self.assertNotIn("X-Api-Key", headers)
+        self.assertNotIn("Authorization", headers)
+        self.assertNotIn("Accept", headers)
+        # A header the client set for itself is untouched.
+        self.assertEqual(headers["User-Agent"], "nautobot")
+
+    def test_a_same_origin_redirect_keeps_them(self):
+        """An endpoint sending /mcp to /mcp/ is ordinary and must keep working."""
+        client = self.build()(self.HEADERS)
+        headers = client._redirect_headers(
+            self.FakeRequest(self.FakeURL("https", "mcp.internal", 443)),
+            self.FakeURL("https", "mcp.internal", 443),
+            "GET",
+        )
+        self.assertEqual(headers["X-Api-Key"], "secret")
+
+    def test_a_client_without_the_hook_is_refused(self):
+        """No hook means no way to strip, so the caller must not follow redirects at all."""
+
+        class NoHook:  # pylint: disable=too-few-public-methods
+            """A client library that does not expose its redirect handling."""
+
+        self.assertIsNone(mcp._redirect_safe_client_class(NoHook, self.HEADERS))
