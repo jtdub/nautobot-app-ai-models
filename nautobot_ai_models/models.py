@@ -1,13 +1,24 @@
-"""Models for AI Models."""
+"""Models for AI Models.
+
+Two registries live here, and neither one calls anything.
+
+* AIProvider and AIModel record which LLM endpoints exist and which models each one offers.
+* MCPServer and MCPTool record which MCP servers exist and what each one advertises.
+
+Every one of them keeps its endpoint, headers, TLS settings, and credentials in a Nautobot
+ExternalIntegration rather than in a field of its own.
+"""
 
 # Django imports
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 # Nautobot imports
 from nautobot.apps.constants import CHARFIELD_MAX_LENGTH
-from nautobot.apps.models import OrganizationalModel, extras_features
+from nautobot.apps.models import OrganizationalModel, PrimaryModel, extras_features
 
+from nautobot_ai_models.choices import MCPTransportChoices
 from nautobot_ai_models.constants import (
     MAX_TEMPERATURE,
     MIN_NUM_PREDICT,
@@ -18,10 +29,10 @@ from nautobot_ai_models.constants import (
 
 
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
-class Provider(OrganizationalModel):  # pylint: disable=too-many-ancestors
+class AIProvider(OrganizationalModel):  # pylint: disable=too-many-ancestors
     """A remote LLM provider endpoint.
 
-    A Provider records that an endpoint exists and how to reach it. It never stores a URL, a header,
+    A AIProvider records that an endpoint exists and how to reach it. It never stores a URL, a header,
     a TLS setting, or a credential of its own. The related Nautobot ExternalIntegration owns all of
     those. This app performs no inference; it only catalogs what is available.
     """
@@ -65,7 +76,9 @@ class Provider(OrganizationalModel):  # pylint: disable=too-many-ancestors
 
         ordering = ["name"]
 
-        # Nautobot core already defines circuits.Provider. Keep the UI labels distinct.
+        # Named AIProvider rather than Provider, because Nautobot core already defines
+        # circuits.Provider, and one unqualified name for two things confuses both a reader
+        # and an import.
         verbose_name = "AI Provider"
         verbose_name_plural = "AI Providers"
 
@@ -76,10 +89,10 @@ class Provider(OrganizationalModel):  # pylint: disable=too-many-ancestors
 
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
 class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
-    """A single model offered by a Provider.
+    """A single model offered by a AIProvider.
 
     The num_predict and temperature fields are optional overrides. An empty value inherits the
-    default from the parent Provider. Read the resolved values through resolved_num_predict and
+    default from the parent AIProvider. Read the resolved values through resolved_num_predict and
     resolved_temperature.
     """
 
@@ -87,7 +100,7 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
     is_dynamic_group_associable_model = False
 
     provider = models.ForeignKey(
-        to="nautobot_ai_models.Provider",
+        to="nautobot_ai_models.AIProvider",
         on_delete=models.CASCADE,
         related_name="ai_models",
         verbose_name="AI Provider",
@@ -139,3 +152,229 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
         """Return this model's temperature, or the provider default when unset."""
         # pylint: disable=no-member  # pylint-django cannot resolve the ForeignKey target here.
         return self.temperature if self.temperature is not None else self.provider.temperature
+
+
+@extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
+class MCPServer(PrimaryModel):  # pylint: disable=too-many-ancestors
+    """An MCP server known to Nautobot, registered by an operator.
+
+    Carries no credentials and no URL of its own. The ExternalIntegration it points at holds the
+    endpoint, its headers and its TLS settings, and that integration's secrets group holds whatever
+    authenticates to it. That is deliberate: an operator already manages outbound endpoints in one
+    place, and a second place to look would be a second place to leak from.
+
+    The fields below split into two groups. An operator owns name, description, external
+    integration, transport, enabled, and tenant. The discovery job owns everything from
+    ``protocol_version`` down, and rewrites those on every successful run.
+    """
+
+    name = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        unique=True,
+        help_text="What this server is called in Nautobot. Not the name the server reports for itself.",
+    )
+    description = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        help_text="What this server is for, in an operator's words.",
+    )
+    external_integration = models.ForeignKey(
+        to="extras.ExternalIntegration",
+        on_delete=models.PROTECT,
+        related_name="mcp_servers",
+        help_text="Carries the endpoint URL, its headers and TLS settings, and its secrets group.",
+    )
+    transport = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        choices=MCPTransportChoices,
+        default=MCPTransportChoices.TYPE_STREAMABLE_HTTP,
+        help_text="How a client reaches this server. A stdio server cannot be discovered from Nautobot.",
+    )
+    enabled = models.BooleanField(
+        default=True,
+        help_text=(
+            "Whether this server is in service. A disabled server is skipped by discovery and is "
+            "meant to be skipped by any app reading this registry."
+        ),
+    )
+    tenant = models.ForeignKey(
+        to="tenancy.Tenant",
+        on_delete=models.PROTECT,
+        related_name="mcp_servers",
+        null=True,
+        blank=True,
+        help_text="The tenant this server belongs to, if the deployment is divided that way.",
+    )
+    protocol_version = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        help_text="The MCP protocol revision the last discovery negotiated. Set by discovery.",
+    )
+    server_name = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        help_text=(
+            "The name the server reports for itself. Self-reported and unverified: the "
+            "specification says in as many words that a client must not make decisions from it."
+        ),
+    )
+    server_version = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        help_text="The version the server reports for itself. Self-reported, like the name. Set by discovery.",
+    )
+    instructions = models.TextField(
+        blank=True,
+        help_text="The server's own guidance on how to use it, as it advertised. Set by discovery.",
+    )
+    capabilities = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "The capabilities object the server advertised, stored whole. Says which of tools, "
+            "resources and prompts it offers. Set by discovery."
+        ),
+    )
+    last_discovered_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "When this server's tool list was last read successfully. Left alone when a run fails, "
+            "so an operator can see which servers have gone stale."
+        ),
+    )
+
+    class Meta:
+        """Meta class."""
+
+        ordering = ["name"]
+        verbose_name = "MCP Server"
+        verbose_name_plural = "MCP Servers"
+
+    def __str__(self):
+        """Stringify instance."""
+        return self.name
+
+    def clean(self):
+        """A server with no URL is a server nothing can reach.
+
+        Checked here rather than left to the first connection: an ExternalIntegration is a shared
+        object, and the one being pointed at may have been made for something that did not need a
+        remote URL.
+        """
+        super().clean()
+        if self.external_integration_id is not None and not self.external_integration.remote_url:
+            raise ValidationError(
+                {"external_integration": "An MCP server needs an external integration with a remote URL."}
+            )
+
+
+@extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
+class MCPTool(OrganizationalModel):  # pylint: disable=too-many-ancestors
+    """One tool an MCP server advertises.
+
+    Not a PrimaryModel: a tool carries no tags and belongs to no dynamic group. It is still change
+    logged, because a discovery run rewrites these rows and an operator needs to see what moved.
+
+    The two write-related fields exist separately on purpose. ``advertised_read_only`` is what the
+    server claimed. ``writable`` is what a person decided. The MCP specification requires that a
+    client treat a server's own annotations as untrusted, so discovery records the claim and never
+    acts on it.
+    """
+
+    mcp_server = models.ForeignKey(
+        to=MCPServer,
+        on_delete=models.CASCADE,
+        related_name="tools",
+        help_text="A tool cannot outlive the server that offers it.",
+    )
+    name = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        help_text="The tool name sent on the wire. Unique within its server, and case sensitive.",
+    )
+    title = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        help_text="The human-readable name the server offered for display, if it offered one.",
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="What the tool does, as the server advertised it.",
+    )
+    input_schema = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="The JSON Schema the server advertised for this tool's arguments.",
+    )
+    output_schema = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="The JSON Schema the server advertised for this tool's structured result, if any.",
+    )
+    enabled = models.BooleanField(
+        default=True,
+        help_text=(
+            "Whether this tool is offered to apps reading this registry. Set by a person. "
+            "Discovery only ever clears it, and only for a tool the server stopped advertising."
+        ),
+    )
+    writable = models.BooleanField(
+        default=True,
+        help_text=(
+            "Whether calling this tool changes something. Set by a person, never by discovery. "
+            "True until somebody says otherwise: guessing wrong this way costs a review, and "
+            "guessing wrong the other way tells every consuming app a tool is safe when it is not."
+        ),
+    )
+    advertised_read_only = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text=(
+            "What the server's own readOnlyHint annotation claims, or unset when it claims "
+            "nothing. Shown so a reviewer can see it. It decides nothing: the MCP specification "
+            "requires that a client treat annotations from a server as untrusted."
+        ),
+    )
+    definition_fingerprint = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        help_text=(
+            "Digest of everything the server advertised about this tool - its description as well "
+            "as its argument schema - as of the last discovery. A consuming app compares it to "
+            "detect that a tool's contract changed under a review somebody already did."
+        ),
+    )
+    last_seen_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When discovery last saw this tool advertised. An older time means the server stopped offering it.",
+    )
+
+    natural_key_field_names = ["mcp_server", "name"]
+
+    class Meta:
+        """Meta class."""
+
+        ordering = ["mcp_server__name", "name"]
+        verbose_name = "MCP Tool"
+        verbose_name_plural = "MCP Tools"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["mcp_server", "name"],
+                name="nautobot_ai_models_mcptool_unique_server_name",
+            ),
+        ]
+
+    def __str__(self):
+        """Stringify instance."""
+        return f"{self.mcp_server.name}: {self.name}"
+
+    @property
+    def is_available(self):
+        """Whether this registry offers the tool at all.
+
+        A tool on a disabled server is not on offer however the tool itself is flagged. Read by the
+        UI to explain why a tool somebody enabled is still not being handed out, and useful to a
+        consuming app that would rather ask one question than two.
+        """
+        return self.enabled and self.mcp_server.enabled

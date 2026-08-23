@@ -521,3 +521,7 @@ Pass `--username`, `--password`, and `--detail-provider` to change the defaults.
 
 The job-result screenshot needs a **Discover AI Models** job result to exist. Run the job once
 before you capture, against a provider whose endpoint answers `GET /v1/models`.
+
+The **Run Discovery** button on an MCP Server detail page only renders when the **MCP Server
+Discovery** job is installed and enabled. Enable it before you capture, or the button is
+missing from the screenshot.

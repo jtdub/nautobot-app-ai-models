@@ -33,9 +33,9 @@ class FetchModelsTest(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        """Create one Provider to query."""
-        fixtures.create_provider()
-        cls.provider = models.Provider.objects.get(name="Test One")
+        """Create one AIProvider to query."""
+        fixtures.create_ai_provider()
+        cls.provider = models.AIProvider.objects.get(name="Test One")
 
     @mock.patch("nautobot_ai_models.discovery.requests.get")
     def test_fetch_models_parses_the_catalog(self, mock_get):

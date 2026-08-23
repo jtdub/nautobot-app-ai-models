@@ -34,21 +34,27 @@ never deletes one.
 The AI Providers list. Each provider points at an External Integration, and the OpenAI-compatible
 column tells you whether the discovery job can read its model catalog.
 
-![AI Providers list](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/ai-providers-list.png)
+![AI Providers list](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/ai-providers-list-light.png)
 
 The provider detail view lists every model the provider offers.
 
-![AI Provider detail](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/provider-detail.png)
+![AI Provider detail](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/ai-provider-detail-light.png)
 
 The **Discover AI Models** job reads `GET /v1/models` and records what it finds. It never deletes a
 record.
 
-![Discovery job result](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/discovery-job-result.png)
+![Discovery job result](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/ai-discovery-job-result-light.png)
 
 If the External Integration you need does not exist yet, create it from a modal without leaving the
 provider form.
 
-![Create an External Integration from a modal](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/external-integration-modal.png)
+![Create an External Integration from a modal](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/embedded-create-modal-light.png)
+
+The MCP Servers list, and one server showing what it advertised.
+
+![MCP Servers list](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/mcp-servers-list-light.png)
+
+![MCP Server detail](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/mcp-server-detail-light.png)
 
 More screenshots can be found in the [Using the App](https://nautobot-ai-models.readthedocs.io/en/latest/user/app_use_cases/) page in the documentation.
 

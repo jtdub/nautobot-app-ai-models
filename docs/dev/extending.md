@@ -11,7 +11,8 @@ the same tab instead of creating a new top-level tab.
 Nautobot merges two `NavMenuTab` declarations only when the **name, weight, and icon all match
 exactly**. A single character of difference produces two separate tabs.
 
-![The AI Tools navigation tab](../images/ai-tools-navigation.png)
+![The AI Tools navigation tab](../images/ai-tools-navigation-light.png#only-light)
+![The AI Tools navigation tab](../images/ai-tools-navigation-dark.png#only-dark)
 
 ### The contract
 

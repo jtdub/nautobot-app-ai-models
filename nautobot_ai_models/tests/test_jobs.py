@@ -2,11 +2,15 @@
 
 from unittest import mock
 
-from nautobot.apps.testing import TransactionTestCase, get_job_class_and_model, run_job_for_testing
-from nautobot.extras.models import JobLogEntry
+from nautobot.apps.testing import TransactionTestCase, get_job_class_and_model
+from nautobot.extras.models import Job, JobLogEntry
 
 from nautobot_ai_models import models
+from nautobot_ai_models.choices import MCPTransportChoices
+from nautobot_ai_models.services import mcp
+from nautobot_ai_models.services.exceptions import MCPCallError
 from nautobot_ai_models.tests import fixtures
+from nautobot_ai_models.tests.job_runner import run_job
 
 
 def catalog_response(names):
@@ -27,17 +31,18 @@ class DiscoverAIModelsTest(TransactionTestCase):
     def setUp(self):
         """Create one provider and load the Job model."""
         super().setUp()
-        fixtures.create_provider()
-        self.provider = models.Provider.objects.get(name="Test One")
+        fixtures.create_ai_provider()
+        self.provider = models.AIProvider.objects.get(name="Test One")
         _, self.job_model = get_job_class_and_model("nautobot_ai_models.jobs", "DiscoverAIModels")
         self.job_model.enabled = True
         self.job_model.validated_save()
 
     def run_discovery(self, enable_new_models=True):
         """Run the Job against the single test provider."""
-        return run_job_for_testing(
+        return run_job(
             self.job_model,
-            job_kwargs={"provider": str(self.provider.pk), "enable_new_models": enable_new_models},
+            provider=str(self.provider.pk),
+            enable_new_models=enable_new_models,
         )
 
     def log_messages(self, job_result):
@@ -129,3 +134,133 @@ class DiscoverAIModelsTest(TransactionTestCase):
         messages = self.log_messages(job_result)
         self.assertTrue(any("ValueError" in message for message in messages))
         self.assertFalse(any("secret" in message for message in messages))
+
+
+EMPTY_REPORT = mcp.DiscoveryReport()
+
+
+class MCPServerDiscoveryJobTest(TransactionTestCase):
+    """Test MCPServerDiscovery."""
+
+    databases = ("default", "job_logs")
+
+    def setUp(self):
+        """Three servers, and the job record that discovers them.
+
+        The fixture spreads its servers over all three transports, which is what the filter tests
+        need. These tests are about which servers the job picks up, so they all start reachable and
+        a test that cares about a skip sets that transport itself.
+        """
+        super().setUp()
+        self.servers = fixtures.create_mcpserver()
+        for server in self.servers:
+            server.transport = MCPTransportChoices.TYPE_STREAMABLE_HTTP
+            server.validated_save()
+        self.job = Job.objects.get(
+            module_name="nautobot_ai_models.jobs",
+            job_class_name="MCPServerDiscovery",
+        )
+        self.job.enabled = True
+        self.job.validated_save()
+
+    def _run(self, **job_kwargs):
+        """Run the job, and hand back its result."""
+        job_kwargs.setdefault("mcp_server", None)
+        job_kwargs.setdefault("remove_stale", False)
+        return run_job(self.job, **job_kwargs)
+
+    def _log_messages(self, result):
+        """Every log line the run produced."""
+        return [entry.message for entry in JobLogEntry.objects.filter(job_result=result)]
+
+    @mock.patch("nautobot_ai_models.jobs.mcp.require_client", mock.Mock())
+    @mock.patch("nautobot_ai_models.jobs.mcp.discover")
+    def test_no_target_discovers_every_enabled_server(self, discover):
+        discover.return_value = EMPTY_REPORT
+        disabled = self.servers[2]
+        disabled.enabled = False
+        disabled.validated_save()
+
+        result = self._run()
+
+        self.assertEqual(result.status, "SUCCESS")
+        discovered = {call.args[0].name for call in discover.call_args_list}
+        self.assertEqual(discovered, {"Test One", "Test Two"})
+
+    @mock.patch("nautobot_ai_models.jobs.mcp.require_client", mock.Mock())
+    @mock.patch("nautobot_ai_models.jobs.mcp.discover")
+    def test_named_server_is_the_only_one_discovered(self, discover):
+        discover.return_value = EMPTY_REPORT
+
+        result = self._run(mcp_server=self.servers[1].pk)
+
+        self.assertEqual(result.status, "SUCCESS")
+        self.assertEqual(discover.call_count, 1)
+        self.assertEqual(discover.call_args.args[0].name, "Test Two")
+
+    @mock.patch("nautobot_ai_models.jobs.mcp.require_client", mock.Mock())
+    @mock.patch("nautobot_ai_models.jobs.mcp.discover")
+    def test_remove_stale_is_passed_through(self, discover):
+        discover.return_value = EMPTY_REPORT
+
+        self._run(mcp_server=self.servers[0].pk, remove_stale=True)
+
+        self.assertTrue(discover.call_args.kwargs["remove_stale"])
+
+    @mock.patch("nautobot_ai_models.jobs.mcp.require_client", mock.Mock())
+    @mock.patch("nautobot_ai_models.jobs.mcp.discover")
+    def test_stdio_server_is_skipped_not_attempted(self, discover):
+        discover.return_value = EMPTY_REPORT
+        stdio = self.servers[0]
+        stdio.transport = MCPTransportChoices.TYPE_STDIO
+        stdio.validated_save()
+
+        result = self._run()
+
+        self.assertEqual(result.status, "SUCCESS")
+        attempted = {call.args[0].name for call in discover.call_args_list}
+        self.assertNotIn("Test One", attempted)
+        self.assertTrue(any("cannot open" in message for message in self._log_messages(result)))
+
+    @mock.patch("nautobot_ai_models.jobs.mcp.require_client", mock.Mock())
+    @mock.patch("nautobot_ai_models.jobs.mcp.discover")
+    def test_one_failure_does_not_stop_the_others(self, discover):
+        def _answer(server, **_kwargs):
+            if server.name == "Test Two":
+                raise MCPCallError("the server would not answer")
+            return EMPTY_REPORT
+
+        discover.side_effect = _answer
+
+        result = self._run()
+
+        # Reported as a failure, but every other server was still attempted.
+        self.assertEqual(result.status, "FAILURE")
+        self.assertEqual(discover.call_count, 3)
+        messages = self._log_messages(result)
+        self.assertTrue(any("Test Two" in message for message in messages))
+
+    @mock.patch("nautobot_ai_models.jobs.mcp.require_client", mock.Mock())
+    @mock.patch("nautobot_ai_models.jobs.mcp.discover")
+    def test_nothing_to_do_is_not_a_failure(self, discover):
+        discover.return_value = EMPTY_REPORT
+        models.MCPServer.objects.update(enabled=False)
+
+        result = self._run()
+
+        self.assertEqual(result.status, "SUCCESS")
+        discover.assert_not_called()
+
+    @mock.patch("nautobot_ai_models.jobs.mcp.require_client", mock.Mock())
+    @mock.patch("nautobot_ai_models.jobs.mcp.discover")
+    def test_new_and_changed_tools_are_called_out(self, discover):
+        server = self.servers[0]
+        added = models.MCPTool.objects.create(mcp_server=server, name="brand_new")
+        changed = models.MCPTool.objects.create(mcp_server=server, name="moved_underneath_us")
+        discover.return_value = mcp.DiscoveryReport(added=(added,), definition_changed=(changed,))
+
+        result = self._run(mcp_server=server.pk)
+
+        messages = " ".join(self._log_messages(result))
+        self.assertIn("brand_new", messages)
+        self.assertIn("moved_underneath_us", messages)

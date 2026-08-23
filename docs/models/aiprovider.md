@@ -4,7 +4,11 @@ An AI Provider records one remote LLM endpoint. It does not store a URL, a heade
 or a credential. A related Nautobot [External Integration](https://docs.nautobot.com/projects/core/en/stable/user-guide/platform-functionality/externalintegration/)
 owns all of those. This app performs no inference. It only catalogs what is available.
 
-Each Provider owns zero or more [AI Models](aimodel.md).
+Each AI Provider owns zero or more [AI Models](aimodel.md).
+
+The model class is `AIProvider`, not `Provider`. Nautobot core already defines
+`circuits.Provider`, and one unqualified name for two things confuses both a reader and an
+import.
 
 ## Fields
 

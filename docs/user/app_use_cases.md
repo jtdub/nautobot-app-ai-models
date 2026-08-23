@@ -4,13 +4,22 @@ This document describes common use-cases and scenarios for this App.
 
 ## General Usage
 
-The app adds two lists under the **AI Tools → AI Models** menu: **AI Providers** and **AI Models**.
+The app holds two registries under one **AI Tools** menu.
 
-![The AI Tools navigation tab](../images/ai-tools-navigation.png)
+- **AI Tools → AI Models** lists **AI Providers** and **AI Models**, the LLM endpoints and the
+  models each one offers.
+- **AI Tools → MCP Models** lists **MCP Servers** and **MCP Tools**, the MCP servers and what
+  each one advertises.
 
-![AI Providers list](../images/ai-providers-list.png)
+Neither registry calls anything. Both record what exists so that other apps read one place.
 
-## Use-cases and common workflows
+![The AI Tools navigation tab](../images/ai-tools-navigation-light.png#only-light)
+![The AI Tools navigation tab](../images/ai-tools-navigation-dark.png#only-dark)
+
+![The AI Providers list](../images/ai-providers-list-light.png#only-light)
+![The AI Providers list](../images/ai-providers-list-dark.png#only-dark)
+
+## AI providers and models
 
 ### Add a provider
 
@@ -22,12 +31,14 @@ The app adds two lists under the **AI Tools → AI Models** menu: **AI Providers
 4. Leave **OpenAI-compatible** checked if the endpoint serves `GET /v1/models`.
 5. Optionally set a default **num_predict** and **temperature**.
 
-![Add an AI Provider](../images/provider-add-form.png)
+![Add an AI Provider](../images/ai-provider-add-form-light.png#only-light)
+![Add an AI Provider](../images/ai-provider-add-form-dark.png#only-dark)
 
 The **+** button beside the field opens this modal. Fill it in, select **Create**, and the new
 External Integration is selected on the provider form behind it.
 
-![Create an External Integration from a modal](../images/external-integration-modal.png)
+![Creating an External Integration without leaving the page](../images/embedded-create-modal-light.png#only-light)
+![Creating an External Integration without leaving the page](../images/embedded-create-modal-dark.png#only-dark)
 
 ### Discover the models a provider offers
 
@@ -48,11 +59,13 @@ new records in the disabled state for review.
 A provider that is not OpenAI-compatible is skipped, and the job says so. No standard discovery
 endpoint exists for those.
 
-![Discovery job result](../images/discovery-job-result.png)
+![The Discover AI Models job result](../images/ai-discovery-job-result-light.png#only-light)
+![The Discover AI Models job result](../images/ai-discovery-job-result-dark.png#only-dark)
 
 The provider detail view lists everything the job found.
 
-![AI Provider detail](../images/provider-detail.png)
+![An AI Provider after discovery](../images/ai-provider-detail-light.png#only-light)
+![An AI Provider after discovery](../images/ai-provider-detail-dark.png#only-dark)
 
 ### Override an inference parameter for one model
 
@@ -71,9 +84,118 @@ ai_model.resolved_temperature
 Clear the **Enabled** checkbox. The record stays, its history stays, and the discovery job leaves
 the flag alone. Consumers should skip a disabled model.
 
-## Screenshots
+### Browse every model at once
 
 The AI Models list shows every model across every provider. Filter it by provider, by enabled
 state, or by name.
 
-![AI Models list](../images/ai-models-list.png)
+![The AI Models list](../images/ai-models-list-light.png#only-light)
+![The AI Models list](../images/ai-models-list-dark.png#only-dark)
+
+## MCP servers and tools
+
+### Register a server
+
+1. Go to **AI Tools → MCP Models → MCP Servers** and select **Add**.
+2. Give the server a name and pick its **External Integration**.
+
+    If the integration does not exist yet, select the **+** button beside the field. The External
+    Integration form opens in a modal over the page. Save it, and the new integration is selected
+    without losing anything already typed. This needs the `extras.add_externalintegration`
+    permission; without it, Nautobot hides the button.
+
+3. Choose the **Transport**. Almost every remote server is `streamable-http`. A `stdio` server runs
+   as a subprocess of its client, so a Nautobot worker cannot reach one and discovery skips it.
+4. Save.
+
+![The MCP Servers list](../images/mcp-servers-list-light.png#only-light)
+![The MCP Servers list](../images/mcp-servers-list-dark.png#only-dark)
+
+### Discover what a server offers
+
+Open the server and select **Run Discovery**, or run **Jobs → MCP Models → MCP Server Discovery**
+directly. Leave the server blank to discover every enabled server, which is the form to schedule.
+
+Discovery writes down what the server said. It never enables a tool and never sets `writable`.
+
+A discovered server shows what the operator set, what the server reported about itself, its
+advertised capabilities, its own instructions, and every tool it offers:
+
+![An MCP Server after discovery](../images/mcp-server-detail-light.png#only-light)
+![An MCP Server after discovery](../images/mcp-server-detail-dark.png#only-dark)
+
+### Review the tools
+
+A newly discovered tool arrives enabled and marked `writable=True`. Assume it writes until somebody
+has read what it does.
+
+Go to **AI Tools → MCP Models → MCP Tools**, read each new tool's description and input schema, select
+the ones that only read, and use **Edit Selected** to clear `writable` on all of them at once.
+
+The **Advertised Read Only** column shows what the server itself claimed. Treat it as a hint from
+an unverified party: the MCP specification requires that a client not decide from it. It is there
+so a reviewer can compare the claim against the description.
+
+![The MCP Tools list](../images/mcp-tools-list-light.png#only-light)
+![The MCP Tools list](../images/mcp-tools-list-dark.png#only-dark)
+
+Opening a tool shows both JSON Schemas the server advertised, and the fingerprint that says whether
+its contract has moved since the review:
+
+![An MCP Tool with both advertised schemas](../images/mcp-tool-detail-light.png#only-light)
+![An MCP Tool with both advertised schemas](../images/mcp-tool-detail-dark.png#only-dark)
+
+### Register a server Nautobot cannot reach
+
+A `stdio` server has no endpoint for a worker to open. Register the server, then add its tools by
+hand from **AI Tools → MCP Models → MCP Tools → Add**. Everything else about the record works normally.
+
+## Reading a registry from another app
+
+This is what the app exists for. Both registries are plain Nautobot models, so another app
+reads them through the ORM or the REST API.
+
+### The AI registry
+
+```python
+from nautobot_ai_models.models import AIModel
+
+# Every model on offer, with its provider and endpoint ready to read.
+available = AIModel.objects.filter(
+    enabled=True,
+).select_related("provider__external_integration")
+
+# The effective inference parameters, with the provider default filled in.
+for ai_model in available:
+    print(ai_model.name, ai_model.resolved_num_predict, ai_model.resolved_temperature)
+```
+
+### The MCP registry
+
+```python
+from nautobot_ai_models.models import MCPTool
+
+# Every tool that is on offer, with its server and endpoint ready to read.
+available = MCPTool.objects.filter(
+    enabled=True,
+    mcp_server__enabled=True,
+).select_related("mcp_server__external_integration")
+
+# The read-only subset, for a caller that runs without approval.
+read_only = available.filter(writable=False)
+```
+
+Build the connection from the server's integration. Render the templated fields rather than reading
+them raw, because all three support Jinja2:
+
+```python
+integration = tool.mcp_server.external_integration
+url = integration.render_remote_url({"obj": tool.mcp_server})
+headers = integration.render_headers({"obj": tool.mcp_server})
+```
+
+### Notice that a tool's contract changed
+
+`definition_fingerprint` is a digest of the tool's title, description, and both schemas. Record it
+alongside whatever approval you granted. When it differs from the current value, the server changed
+what the tool is after somebody reviewed it, and the review is stale.

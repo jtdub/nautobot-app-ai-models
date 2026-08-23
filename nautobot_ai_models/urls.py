@@ -11,8 +11,10 @@ app_name = "nautobot_ai_models"
 router = NautobotUIViewSetRouter()
 
 # The standard is for the route to be the hyphenated version of the model class name plural.
-router.register("providers", views.ProviderUIViewSet)
+router.register("ai-providers", views.AIProviderUIViewSet)
 router.register("ai-models", views.AIModelUIViewSet)
+router.register("mcp-servers", views.MCPServerUIViewSet)
+router.register("mcp-tools", views.MCPToolUIViewSet)
 
 
 urlpatterns = [

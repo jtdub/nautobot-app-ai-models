@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "nautobot-ai-models"
 version = "1.0.0"
-description = "Nautobot app that catalogs LLM providers and models."
+description = "Nautobot app that catalogs LLM providers, LLM models, MCP servers, and MCP tools."
 authors = ["James Williams <james.williams@jtdub.com>"]
 license = "Apache-2.0"
 readme = "README.md"
@@ -30,7 +30,14 @@ include = [
 [tool.poetry.dependencies]
 python = ">=3.10,<3.15"
 # Used for local development
-nautobot = ">=3.2.0,<4.0.0"
+nautobot = ">=3.1.0,<4.0.0"
+
+# The MCP client, used only by the MCP Server Discovery job. Optional and imported lazily so an
+# operator who wants nothing but the models installs nothing extra.
+mcp = { version = ">=2.0.0,<3.0.0", optional = true }
+# Imported directly by services/mcp.py to build the session's HTTP client, so it is declared
+# here rather than relied on as one of mcp's own dependencies.
+httpx2 = { version = "*", optional = true }
 
 [tool.poetry.group.dev.dependencies]
 coverage = "*"
@@ -68,7 +75,10 @@ griffe = "1.1.1"
 mkdocs-glightbox = "~0.5.2"
 
 [tool.poetry.extras]
+discovery = ["mcp", "httpx2"]
 all = [
+    "mcp",
+    "httpx2",
 ]
 
 [tool.pylint.main]

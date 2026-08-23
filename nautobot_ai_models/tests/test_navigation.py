@@ -17,6 +17,7 @@ from nautobot_ai_models.constants import (
     AI_TOOLS_TAB_ICON,
     AI_TOOLS_TAB_NAME,
     AI_TOOLS_TAB_WEIGHT,
+    MCP_MODELS_GROUP_WEIGHT,
 )
 
 
@@ -56,14 +57,34 @@ class AIToolsNavigationTest(TestCase):
         self.assertIn('color="#FFFFFF"', content)
         self.assertIn('fill="currentcolor"', content)
 
-    def test_group_holds_both_models(self):
+    def groups(self):
+        """The tab's groups, keyed by name."""
+        raw = self.tab.groups
+        groups = list(raw.values()) if hasattr(raw, "values") else list(raw)
+        return {group.name: group for group in groups}
+
+    def links_of(self, group):
+        """The resolved URLs of a group's items. NavMenuItem stores the URL, not the route name."""
+        raw = group.items
+        items = list(raw.values()) if hasattr(raw, "values") else list(raw)
+        return [item.link for item in items]
+
+    def test_tab_holds_one_group_per_registry(self):
+        """Both registries hang off the one shared tab, each with its own weight."""
+        groups = self.groups()
+        self.assertEqual(sorted(groups), ["AI Models", "MCP Models"])
+        self.assertEqual(groups["AI Models"].weight, AI_MODELS_GROUP_WEIGHT)
+        self.assertEqual(groups["MCP Models"].weight, MCP_MODELS_GROUP_WEIGHT)
+        self.assertLess(AI_MODELS_GROUP_WEIGHT, MCP_MODELS_GROUP_WEIGHT)
+
+    def test_ai_models_group_holds_both_models(self):
         """The AI Models group lists the provider and the model."""
-        groups = list(self.tab.groups.values()) if hasattr(self.tab.groups, "values") else list(self.tab.groups)
-        self.assertEqual(len(groups), 1)
-        group = groups[0]
-        self.assertEqual(group.name, "AI Models")
-        self.assertEqual(group.weight, AI_MODELS_GROUP_WEIGHT)
-        # NavMenuItem stores the resolved URL, not the route name.
-        links = [item.link for item in (group.items.values() if hasattr(group.items, "values") else group.items)]
-        self.assertIn(reverse("plugins:nautobot_ai_models:provider_list"), links)
+        links = self.links_of(self.groups()["AI Models"])
+        self.assertIn(reverse("plugins:nautobot_ai_models:aiprovider_list"), links)
         self.assertIn(reverse("plugins:nautobot_ai_models:aimodel_list"), links)
+
+    def test_mcp_models_group_holds_both_models(self):
+        """The MCP Models group lists the server and the tool."""
+        links = self.links_of(self.groups()["MCP Models"])
+        self.assertIn(reverse("plugins:nautobot_ai_models:mcpserver_list"), links)
+        self.assertIn(reverse("plugins:nautobot_ai_models:mcptool_list"), links)

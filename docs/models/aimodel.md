@@ -1,13 +1,13 @@
 # AI Model
 
-An AI Model records one model offered by an [AI Provider](provider.md). It is a catalog entry.
+An AI Model records one model offered by an [AI Provider](aiprovider.md). It is a catalog entry.
 This app performs no inference.
 
 ## Fields
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `provider` | foreign key to `Provider` | yes | The provider that offers this model. Deleting the provider deletes its models. |
+| `provider` | foreign key to `AIProvider` | yes | The provider that offers this model. Deleting the provider deletes its models. |
 | `name` | string | yes | The model identifier the provider expects, for example `gpt-4o-mini`. Unique within one provider. |
 | `description` | string | no | Free-text description. |
 | `enabled` | boolean | yes | Consumers should ignore a disabled model. Default `True`. |

@@ -113,8 +113,10 @@ nav:
       - Frequently Asked Questions: "user/faq.md"
       - External Interactions: "user/external_interactions.md"
       - Data Models:
-          - AI Provider: "models/provider.md"
+          - AI Provider: "models/aiprovider.md"
           - AI Model: "models/aimodel.md"
+          - MCP Server: "models/mcpserver.md"
+          - MCP Tool: "models/mcptool.md"
   - Administrator Guide:
       - Install and Configure: "admin/install.md"
       - Upgrade: "admin/upgrade.md"
