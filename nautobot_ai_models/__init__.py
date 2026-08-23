@@ -18,7 +18,7 @@ class AIModelsConfig(NautobotAppConfig):
     author_email = "james.williams@jtdub.com"
     description = "Nautobot app that catalogs LLM providers and models."
     base_url = "ai-models"
-    min_version = "3.2.0"
+    min_version = "3.1.0"
     max_version = "3.9.99"
     required_settings = []
     default_settings = {}
