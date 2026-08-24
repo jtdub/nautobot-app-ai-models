@@ -6,4 +6,4 @@ app release is supported until the next minor release of the app.
 
 | AI Models Version | Nautobot First Support Version | Nautobot Last Support Version |
 | ------------- | -------------------- | ------------- |
-| 1.0.X         | 3.1.0                | 3.9.99        |
+| 1.0.X         | 3.1.0                | 3.99.99       |
