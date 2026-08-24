@@ -23,6 +23,20 @@ from nautobot_ai_models.services.exceptions import MCPCallError, MCPConfiguratio
 from nautobot_ai_models.tests import fixtures
 
 
+class TaskGroupError(Exception):
+    """An anyio exception group, on every Python this app supports.
+
+    The real one is `ExceptionGroup`, a builtin from Python 3.11, and this app supports 3.10.
+    `_cause()` reads nothing but the `exceptions` attribute, which is what an anyio group exposes
+    and what this carries, so the tests do not need the builtin to exercise the unwrapping.
+    """
+
+    def __init__(self, message, exceptions):
+        """Hold the message and the nested exceptions, as a real group does."""
+        super().__init__(message)
+        self.exceptions = tuple(exceptions)
+
+
 class FakeClient:  # pylint: disable=too-few-public-methods
     """Answers `describe()` with whatever a test handed it."""
 
@@ -411,20 +425,20 @@ class ErrorReportingTest(TestCase):
         the Job log, which says nothing about the DNS failure behind it.
         """
         message = self._message(
-            ExceptionGroup("unhandled errors in a TaskGroup", [OSError("Name or service not known")])
+            TaskGroupError("unhandled errors in a TaskGroup", [OSError("Name or service not known")])
         )
         self.assertIn("OSError", message)
         self.assertNotIn("sub-exception", message)
 
     def test_every_cause_in_a_group_is_reported(self):
         """A task group can fail more than one way at once, and both are worth seeing."""
-        message = self._message(ExceptionGroup("group", [OSError("refused"), TimeoutError("timed out")]))
+        message = self._message(TaskGroupError("group", [OSError("refused"), TimeoutError("timed out")]))
         self.assertIn("OSError", message)
         self.assertIn("TimeoutError", message)
 
     def test_a_nested_group_cannot_smuggle_a_message_out(self):
         """Redaction has to hold at every depth, not only the top one."""
-        error = ExceptionGroup("wrapper", [ExceptionGroup("inner", [ValueError("token=abc123")])])
+        error = TaskGroupError("wrapper", [TaskGroupError("inner", [ValueError("token=abc123")])])
         message = self._message(error)
         self.assertIn("ValueError", message)
         self.assertNotIn("abc123", message)
@@ -433,9 +447,9 @@ class ErrorReportingTest(TestCase):
         """A deeply nested group must not recurse without end inside a worker."""
         error = OSError("innermost")
         for _ in range(20):
-            error = ExceptionGroup("wrapper", [error])
-        # It stops digging rather than hanging, and still names something.
-        self.assertIn("ExceptionGroup", self._message(error))
+            error = TaskGroupError("wrapper", [error])
+        # It stops digging rather than hanging, and still names the wrapper it stopped on.
+        self.assertIn(TaskGroupError.__name__, self._message(error))
 
     def test_the_server_is_named(self):
         """One failure among twenty servers has to say which one."""
