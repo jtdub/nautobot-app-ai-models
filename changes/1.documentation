@@ -1,0 +1,3 @@
+Added documentation screenshots for both registries, captured in the light and dark themes: the AI Providers and AI Models lists, the AI Provider detail view, the add form, the embedded External Integration modal, the discovery job result, the MCP Servers and MCP Tools lists, the MCP Server and MCP Tool detail views, and the AI Tools navigation tab.
+Added development/bin/take_screenshots.py, a Playwright script that recaptures every documentation screenshot from a running development instance.
+Added a guide for other AI apps on joining the shared "AI Tools" navigation tab.
