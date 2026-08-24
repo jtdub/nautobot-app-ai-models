@@ -179,6 +179,9 @@ directory = "changes"
 filename = "docs/admin/release_notes/version_1.0.md"
 template = "development/towncrier_template.j2"
 start_string = "<!-- towncrier release notes start -->"
+# GitHub redirects /issues/N to /pull/N when N is a pull request, so one format serves both.
+# The number in a change fragment's filename is the issue it closes, or the pull request that
+# made the change when there was no issue.
 issue_format = "[#{issue}](https://github.com/jtdub/nautobot-app-ai-models/issues/{issue})"
 
 [[tool.towncrier.type]]
