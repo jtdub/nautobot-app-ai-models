@@ -1,8 +1,7 @@
-"""Jobs for nautobot_ai_models.
+"""Discovery jobs. Both only read.
 
-Two discovery jobs, and both only read. Each asks a remote endpoint what it offers and writes
-the answer onto the registry. Neither grants anything, and neither deletes a record unless it
-is told to.
+Each asks a remote endpoint what it offers and writes the answer onto the registry. Neither
+deletes a record unless it is told to.
 """
 
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
@@ -15,7 +14,6 @@ from nautobot_ai_models.models import AIModel, AIProvider, MCPServer
 from nautobot_ai_models.services import mcp
 from nautobot_ai_models.services.exceptions import MCPError
 
-# Nautobot reads this module-level constant to group the Jobs in the UI.
 name = "AI Models"  # pylint: disable=invalid-name
 
 
@@ -35,7 +33,8 @@ class DiscoverAIModels(Job):
         model=AIProvider,
         required=False,
         label="AI Provider",
-        description="Limit discovery to one provider. Leave empty to run against every provider.",
+        description="Limit discovery to one provider. Leave empty to run against every enabled provider.",
+        query_params={"enabled": True},
     )
     enable_new_models = BooleanVar(
         default=True,
@@ -44,9 +43,9 @@ class DiscoverAIModels(Job):
 
     def run(self, *, provider, enable_new_models):  # pylint: disable=arguments-differ
         """Discover models for one provider or for all of them."""
-        providers = [provider] if provider is not None else list(AIProvider.objects.all())
+        providers = [provider] if provider is not None else list(AIProvider.objects.filter(enabled=True))
         if not providers:
-            self.logger.warning("No AI Providers are defined. Nothing to discover.")
+            self.logger.warning("No enabled AI Provider to discover.")
             return
 
         for each_provider in providers:
@@ -54,6 +53,13 @@ class DiscoverAIModels(Job):
 
     def discover_provider(self, provider, enable_new_models):
         """Sync the AIModel records for a single provider. Never delete a record."""
+        if not provider.enabled:
+            self.logger.warning(
+                "Skipped. This provider is disabled.",
+                extra={"object": provider},
+            )
+            return
+
         if not provider.openai_compatible:
             self.logger.warning(
                 "Skipped. No standard model-discovery endpoint exists for a provider that is not OpenAI-compatible.",
@@ -71,7 +77,6 @@ class DiscoverAIModels(Job):
             )
             return
         except Exception as error:  # pylint: disable=broad-except
-            # Log the exception type only. A message may carry a URL with an embedded credential.
             self.logger.failure(
                 "Model discovery request failed: %s",
                 type(error).__name__,
@@ -82,9 +87,6 @@ class DiscoverAIModels(Job):
         try:
             created, updated = self.sync_models(provider, discovered, enable_new_models)
         except (ValidationError, IntegrityError) as error:
-            # Every name here came from an unverified endpoint and lands in a bounded column.
-            # A provider offering a 300-character model id must fail this one provider, not
-            # raise out of run() and skip every provider after it.
             self.logger.failure(
                 "This provider offered a model this registry cannot hold: %s",
                 type(error).__name__,
@@ -121,7 +123,6 @@ class DiscoverAIModels(Job):
                 self.logger.info("Created AI Model.", extra={"object": ai_model})
                 continue
 
-            # Never overwrite enabled, num_predict, or temperature. A user may have set them by hand.
             if entry["description"] and not ai_model.description:
                 ai_model.description = entry["description"]
                 ai_model.validated_save()
@@ -164,12 +165,7 @@ class MCPServerDiscovery(Job):
 
         name = "MCP Server Discovery"
         description = "Read each MCP server's tool list and record what it advertises."
-        # No job input carries a credential: they come from each server's secrets group at
-        # connection time. False so this job can be scheduled, which is the point of it.
         has_sensitive_variables = False
-        # One session may hold a server-sent-event stream open for SSE_READ_TIMEOUT_SECONDS,
-        # so a run over several servers needs more headroom than Celery's default gives it.
-        # Being killed part way through defeats the whole point of continuing past a failure.
         soft_time_limit = 1800
         time_limit = 2100
 
@@ -180,8 +176,6 @@ class MCPServerDiscovery(Job):
             self.logger.warning("No enabled MCP server to discover.")
             return "No enabled MCP server to discover."
 
-        # Resolved once, up front. A deployment installed without the 'discovery' extra should say
-        # so before it starts reporting a failure against every server in turn.
         mcp.require_client()
 
         succeeded, skipped, failed = [], [], []
@@ -202,37 +196,48 @@ class MCPServerDiscovery(Job):
 
         summary = f"{len(succeeded)} server(s) discovered, {len(skipped)} skipped, {len(failed)} failed."
         if failed:
-            # One unreachable server must not hide the ones that worked, so this is said at the end
-            # rather than raised at the point of failure.
             self.fail(f"{summary} Failed: {', '.join(str(server) for server in failed)}.")
         return summary
 
     def _targets(self, mcp_server):
-        """The servers this run covers: the one asked for, or every enabled one."""
+        """Return the servers this run covers: the one asked for, or every enabled one."""
         if mcp_server is not None:
             return [mcp_server]
         return list(MCPServer.objects.filter(enabled=True).select_related("external_integration"))
 
     def _discover_one(self, server, remove_stale):
-        """Discover one server. True when it worked.
+        """Discover one server, catching every failure.
 
-        Every failure is caught. An operator running this against twenty servers wants the other
-        nineteen done, and wants to be told which one did not answer.
+        Args:
+            server: The MCPServer to read.
+            remove_stale: Delete tools the server no longer advertises.
+
+        Returns:
+            bool: True when the run succeeded.
         """
         try:
             report = mcp.discover(server, remove_stale=remove_stale)
         except MCPError as error:
-            # The message never carries a header value or a token: `MCPConnection.__repr__` hides
-            # them, and nothing here formats a connection into a log line.
             self.logger.error("Discovery failed for %s: %s", server, error, extra={"object": server})
             return False
 
         self.logger.info("Discovered %s: %s", server, report.summary(), extra={"object": server})
         for tool in report.added:
             self.logger.info(
-                "New tool %s. Review whether it writes, then enable it.", tool.name, extra={"object": tool}
+                "New tool %s. Review whether it writes.%s",
+                tool.name,
+                "" if tool.enabled else " It is disabled until somebody enables it.",
+                extra={"object": tool},
             )
+        disabled_by_change = set(report.disabled_by_change)
         for tool in report.definition_changed:
+            if tool in disabled_by_change:
+                self.logger.warning(
+                    "Tool %s changed its definition and has been disabled. Review it, then enable it again.",
+                    tool.name,
+                    extra={"object": tool},
+                )
+                continue
             self.logger.warning(
                 "Tool %s changed its definition since it was last read. Review it again.",
                 tool.name,

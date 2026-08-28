@@ -13,30 +13,38 @@
 
 ## Overview
 
-AI Models turns Nautobot into the source of truth for your LLM estate. It records which
-providers exist, how to reach each one, and which models each provider offers. Access control,
-change logging, custom fields, and the REST API all come from Nautobot.
+AI Models makes Nautobot the source of truth for your LLM estate. It records which providers
+exist, how to reach each one, and which models each provider offers. Access control, change
+logging, custom fields, and the REST API all come from Nautobot.
 
-The app is a data catalog. It contains no AI or LLM client code and performs no inference.
-Another app, a Job, or an external system reads these records and does the work. That keeps the
-question of *what is available and allowed* separate from the question of *how to call it*.
+The app is a data catalog. It has no AI or LLM client code and it does no inference. Another app, a
+Job, or an external system reads these records and does the work. This keeps the question *what is
+available and allowed* apart from the question *how do I call it*.
 
-The app never stores a URL or a credential of its own. Each **AI Provider** points at a Nautobot
-External Integration, which supplies the remote URL, HTTP headers, SSL verification, CA file
-path, timeout, and Secrets Group. Each **AI Model** belongs to a provider and carries a name, a
-description, an enabled flag, and optional `num_predict` and `temperature` overrides that fall
-back to the provider default. A **Discover AI Models** Job reads `GET /v1/models` from every
-OpenAI-compatible provider and keeps the model list current. It creates and updates records, and
-never deletes one.
+The app keeps no URL and no credential of its own. Each **AI Provider** points at a Nautobot
+External Integration. That integration gives the remote URL, the HTTP headers, the SSL
+verification, the CA file path, the timeout, and the Secrets Group. A provider also records its
+API dialect, so that a consuming app knows how to address the endpoint.
+
+Each **AI Model** belongs to a provider. It carries a name, a description, and a kind of `chat` or
+`embedding`. It also carries an enabled flag, the cost of a million tokens, and the parameters to
+send with a call. `num_predict` and `temperature` fall back to the provider default.
+
+The **Discover AI Models** Job reads `GET /v1/models` from each enabled, OpenAI-compatible provider
+and keeps the model list current. It creates and updates records. It never deletes one.
+
+A second pair of models does the same for MCP. An **MCP Server** records one server and what it
+reported about itself. An **MCP Tool** records one tool that a server advertises, with both
+advertised JSON Schemas and the two flags that a person owns.
 
 ### Screenshots
 
-The AI Providers list. Each provider points at an External Integration, and the OpenAI-compatible
-column tells you whether the discovery job can read its model catalog.
+The AI Providers list. Each provider points at an External Integration. The Provider Type column
+says how a consuming app addresses the endpoint.
 
 ![AI Providers list](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/ai-providers-list-light.png)
 
-The provider detail view lists every model the provider offers.
+The provider detail view lists each model that the provider offers.
 
 ![AI Provider detail](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/ai-provider-detail-light.png)
 
@@ -45,22 +53,22 @@ record.
 
 ![Discovery job result](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/ai-discovery-job-result-light.png)
 
-If the External Integration you need does not exist yet, create it from a modal without leaving the
-provider form.
+If the External Integration that you need does not exist, create it in a modal. You do not leave
+the provider form.
 
 ![Create an External Integration from a modal](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/embedded-create-modal-light.png)
 
-The MCP Servers list, and one server showing what it advertised.
+The MCP Servers list, and one server with what it advertised.
 
 ![MCP Servers list](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/mcp-servers-list-light.png)
 
 ![MCP Server detail](https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/docs/images/mcp-server-detail-light.png)
 
-More screenshots can be found in the [Using the App](https://nautobot-ai-models.readthedocs.io/en/latest/user/app_use_cases/) page in the documentation.
+For more screenshots, read the [Using the App](https://nautobot-ai-models.readthedocs.io/en/latest/user/app_use_cases/) page.
 
 ## Documentation
 
-Full documentation for this App can be found on [Read the Docs](https://nautobot-ai-models.readthedocs.io/en/latest/):
+The full documentation for this app is on [Read the Docs](https://nautobot-ai-models.readthedocs.io/en/latest/):
 
 - [User Guide](https://nautobot-ai-models.readthedocs.io/en/latest/user/app_overview/) - Overview, Using the App, Getting Started.
 - [Administrator Guide](https://nautobot-ai-models.readthedocs.io/en/latest/admin/install/) - How to Install, Configure, Upgrade, or Uninstall the App.
@@ -70,12 +78,12 @@ Full documentation for this App can be found on [Read the Docs](https://nautobot
 
 ### Contributing to the Documentation
 
-You can find all the Markdown source for the App documentation under the [`docs`](https://github.com/jtdub/nautobot-app-ai-models/tree/develop/docs) folder in this repository. For simple edits, a Markdown capable editor is sufficient: clone the repository and edit away.
+The Markdown source of the documentation is in the [`docs`](https://github.com/jtdub/nautobot-app-ai-models/tree/develop/docs) folder of this repository. For a simple edit, a Markdown editor is enough. Clone the repository and make the change.
 
-If you need to view the fully-generated documentation site, you can build it with [MkDocs](https://www.mkdocs.org/). A container hosting the documentation can be started using the `invoke` commands (details in the [Development Environment Guide](https://nautobot-ai-models.readthedocs.io/en/latest/dev/dev_environment/#docker-development-environment)) on [http://localhost:8001](http://localhost:8001). Using this container, as your changes to the documentation are saved, they will be automatically rebuilt and any pages currently being viewed will be reloaded in your browser.
+To see the generated documentation site, build it with [MkDocs](https://www.mkdocs.org/). The `invoke` commands start a container that hosts the documentation on [http://localhost:8001](http://localhost:8001). The [Development Environment Guide](https://nautobot-ai-models.readthedocs.io/en/latest/dev/dev_environment/#docker-development-environment) gives the details. The container rebuilds a page when you save a change, and your browser reloads it.
 
-Any PRs with fixes or improvements are very welcome!
+Pull requests with fixes or improvements are welcome.
 
 ## Questions
 
-For any questions or comments, please check the [FAQ](https://nautobot-ai-models.readthedocs.io/en/latest/user/faq/) first. Feel free to also swing by the [Network to Code Slack](https://networktocode.slack.com/) (channel `#nautobot`), sign up [here](http://slack.networktocode.com/) if you don't have an account.
+For a question or a comment, read the [FAQ](https://nautobot-ai-models.readthedocs.io/en/latest/user/faq/) first. You can also use the [Network to Code Slack](https://networktocode.slack.com/), in the `#nautobot` channel. If you have no account, sign up [here](http://slack.networktocode.com/).

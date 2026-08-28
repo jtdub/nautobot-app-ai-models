@@ -1,9 +1,9 @@
 """Filtering for nautobot_ai_models.
 
-The MCP filter surface is written out rather than generated. It is the API another app reads the
-registry through, so it should change because somebody decided to change it.
+The MCP filter surface is written out rather than generated, because another app codes against it.
 """
 
+from django_filters import BooleanFilter
 from nautobot.apps.filters import (
     MultiValueCharFilter,
     MultiValueDateTimeFilter,
@@ -49,6 +49,10 @@ class AIModelFilterSet(NameSearchFilterSet, NautobotFilterSet):  # pylint: disab
         to_field_name="name",
         label="AI Provider (name or ID)",
     )
+    provider_enabled = BooleanFilter(
+        field_name="provider__enabled",
+        label="Provider enabled",
+    )
 
     class Meta:
         """Meta attributes for filter."""
@@ -84,17 +88,12 @@ class MCPServerFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ancesto
         field_name="tools",
         label="Has tools",
     )
-    # Declared rather than generated. MCPServer is a PrimaryModel, so it carries tags, and an
-    # explicit `Meta.fields` list does not pick the filter up on its own.
     tags = TagFilter()
 
     class Meta:
         """Meta attributes for filter."""
 
         model = models.MCPServer
-        # Explicit rather than "__all__": this list is what another app codes against.
-        # `instructions` and `capabilities` are left out on purpose - free text and a nested blob
-        # are not useful filters.
         fields = [  # pylint: disable=nb-use-fields-all
             "id",
             *MCP_SERVER_OPERATOR_FIELDS,

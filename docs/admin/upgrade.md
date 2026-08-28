@@ -1,7 +1,11 @@
 # Upgrading the App
 
-Here you will find any steps necessary to upgrade the App in your Nautobot environment.
+This page gives the steps to upgrade the app in your Nautobot environment.
 
 ## Upgrade Guide
 
-When a new release comes out it may be necessary to run a migration of the database to account for any changes in the data models used by this app. Execute the command `nautobot-server post-upgrade` within the runtime environment of your Nautobot installation after updating the `nautobot-ai-models` package via `pip`.
+A new release can change the data models of this app. Such a change needs a database migration.
+
+1. Update the `nautobot-ai-models` package with `pip`.
+2. Run `nautobot-server post-upgrade` in the runtime environment of your Nautobot installation.
+3. Restart the Nautobot services.
