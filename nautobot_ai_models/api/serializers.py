@@ -46,15 +46,14 @@ class MCPServerSerializer(NautobotModelSerializer, TaggedModelSerializerMixin): 
 
         read_only_fields = list(MCP_SERVER_DISCOVERED_FIELDS)
 
-    def get_tool_count(self, obj):
+    def get_tool_count(self, obj) -> int:
         """Return how many tools this server offers.
 
         Args:
-            obj: The MCPServer being rendered.
+            obj (MCPServer): The server being rendered.
 
         Returns:
-            int: The viewset's annotation, or a count when the object did not come from that
-                queryset.
+            The viewset's annotation, or a count when the object did not come from that queryset.
         """
         count = getattr(obj, "tool_count", None)
         return obj.tools.count() if count is None else count
