@@ -94,6 +94,11 @@ examined. Do not change the allowlist to a denylist.
 
 Each key on the list shapes an answer. No key on the list decides who answers.
 
+CAUTION: `extra_body` is the one key whose contents the app does not check. A client merges it into
+the request body without a change, so a provider-specific field can travel through it. Nothing in a
+request body selects the host that answers, but the allowlist stops at the top level here. Give
+`change_aimodel` only to a person you trust with that.
+
 The app checks the list when it saves a record, and again when it reads the parameters. Once is not
 enough. A fixture, a data migration, or a direct ORM write does not run model validation. The read
 side is where an unchecked key would go to a client. Read the parameters through

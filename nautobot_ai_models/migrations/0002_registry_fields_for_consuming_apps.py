@@ -10,16 +10,22 @@ from django.db import migrations, models
 def fill_in_the_new_columns(apps, schema_editor):
     """Fill in the four new columns.
 
-    A provider that served the OpenAI shape becomes ``openai_compatible``. One that did not is left
-    empty, because the boolean says nothing about what it speaks instead and a guess would send the
-    credential elsewhere. The model refuses an empty value, so an operator answers on the next save.
+    A provider that served the OpenAI shape becomes ``openai_compatible``, but only when its
+    integration carries a remote URL. That dialect is an address rather than a service, so
+    AIProvider.clean() requires the URL, and labelling a row that has none would make it refuse
+    every later save over a field nobody touched.
+
+    Every other provider is left empty. The boolean says nothing about what a row that was not
+    OpenAI-shaped speaks instead, and a guess would send the credential elsewhere. The model
+    refuses an empty value, so an operator answers on the next save.
     """
     AIProvider = apps.get_model("nautobot_ai_models", "AIProvider")  # pylint: disable=invalid-name
     AIModel = apps.get_model("nautobot_ai_models", "AIModel")  # pylint: disable=invalid-name
 
-    AIProvider.objects.filter(openai_compatible=True).update(provider_type="openai_compatible")
-    AIProvider.objects.filter(openai_compatible=False).update(provider_type="")
-    AIProvider.objects.update(enabled=True)
+    AIProvider.objects.update(provider_type="", enabled=True)
+    AIProvider.objects.filter(openai_compatible=True).exclude(external_integration__remote_url="").update(
+        provider_type="openai_compatible"
+    )
 
     AIModel.objects.update(kind="chat", default_parameters={})
 
@@ -80,6 +86,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="aiprovider",
             name="provider_type",
-            field=models.CharField(db_index=True, default="openai", max_length=255),
+            field=models.CharField(blank=True, db_index=True, default="openai", max_length=255),
         ),
     ]

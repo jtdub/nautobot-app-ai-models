@@ -46,16 +46,26 @@ class AIProviderFormTest(FormTestCases.BaseFormTestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertTrue(form.save())
 
-    def test_provider_type_is_required(self):
-        """Nothing can address an endpoint whose dialect nobody has recorded."""
+    def test_the_form_offers_an_empty_provider_type(self):
+        """A migrated row carries an empty dialect, and the form must show it as empty.
+
+        Without a blank option the select shows its first choice for such a row, and a save writes
+        the dialect that the migration deliberately refused to guess.
+        """
+        form = forms.AIProviderForm()
+        self.assertIn("", [value for value, _ in form.fields["provider_type"].choices])
+
+    def test_an_empty_provider_type_is_refused_by_the_form(self):
+        """The empty option must not be a way to save a row with no dialect."""
         form = forms.AIProviderForm(
             data={
                 "name": "Development",
                 "external_integration": self.integration.pk,
+                "provider_type": "",
             }
         )
         self.assertFalse(form.is_valid())
-        self.assertIn("This field is required.", form.errors["provider_type"])
+        self.assertIn("provider_type", form.errors)
 
     def test_an_openai_compatible_provider_needs_a_remote_url(self):
         """That type is an address, not a service. Without a URL a client reaches somebody else."""

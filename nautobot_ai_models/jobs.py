@@ -223,7 +223,10 @@ class MCPServerDiscovery(Job):
         self.logger.info("Discovered %s: %s", server, report.summary(), extra={"object": server})
         for tool in report.added:
             self.logger.info(
-                "New tool %s. Review whether it writes, then enable it.", tool.name, extra={"object": tool}
+                "New tool %s. Review whether it writes.%s",
+                tool.name,
+                "" if tool.enabled else " It is disabled until somebody enables it.",
+                extra={"object": tool},
             )
         disabled_by_change = set(report.disabled_by_change)
         for tool in report.definition_changed:

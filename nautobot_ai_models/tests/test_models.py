@@ -193,6 +193,32 @@ class TestAIModel(ModelTestCases.BaseModelTestCase):
         with self.assertRaises(ValidationError):
             ai_model.validated_save()
 
+    def test_a_temperature_parameter_outside_the_range_is_refused(self):
+        """The JSON field must not be a way past the validators on the column of the same name."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        for value in (-1, 900, "warm", True, None):
+            with self.subTest(value=value):
+                ai_model.default_parameters = {"temperature": value}
+                with self.assertRaises(ValidationError):
+                    ai_model.validated_save()
+
+    def test_resolved_parameters_survives_a_value_no_validation_saw(self):
+        """A list endpoint renders this for every row. One unusable row must not take the rest."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        models.AIModel.objects.filter(pk=ai_model.pk).update(default_parameters={"temperature": "warm", "seed": 7})
+
+        ai_model.refresh_from_db()
+        self.assertEqual(ai_model.resolved_parameters, {"seed": 7})
+
+    def test_resolved_parameters_survives_a_column_that_is_not_a_mapping(self):
+        """A direct ORM write can put a list here. Reading it must not raise."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        models.AIModel.objects.filter(pk=ai_model.pk).update(default_parameters=["seed"])
+
+        ai_model.refresh_from_db()
+        self.assertEqual(ai_model.resolved_parameters, {})
+        self.assertIsNone(ai_model.resolved_temperature)
+
     def test_a_parameter_outside_the_allowlist_is_dropped_at_read_time(self):
         """A fixture, a data migration or a direct ORM write never runs clean(). This is the net."""
         ai_model = models.AIModel.objects.get(name="Test One")

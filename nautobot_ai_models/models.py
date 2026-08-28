@@ -4,6 +4,8 @@ Every model keeps its endpoint, headers, TLS settings, and credentials in a Naut
 ExternalIntegration. None of them calls anything.
 """
 
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -71,6 +73,7 @@ class AIProvider(OrganizationalModel):  # pylint: disable=too-many-ancestors
         max_length=CHARFIELD_MAX_LENGTH,
         choices=AIProviderTypeChoices,
         default=AIProviderTypeChoices.OPENAI,
+        blank=True,
         db_index=True,
         verbose_name="Provider type",
         help_text=(
@@ -116,14 +119,23 @@ class AIProvider(OrganizationalModel):  # pylint: disable=too-many-ancestors
         return self.name
 
     def clean(self):
-        """Check that an address-type provider has a remote URL.
+        """Check that this provider can be addressed.
+
+        ``blank=True`` exists so the migration can leave a legacy row unanswered, and so the form
+        renders an empty option for one. Without it the select would show the first choice for such
+        a row, and a save would write the dialect the migration refused to guess.
 
         Raises:
-            ValidationError: The provider type is in ``ADDRESSED_PROVIDER_TYPES`` and its
-                integration carries no remote URL, so a client would fall back to another
-                company's endpoint.
+            ValidationError: The dialect is unanswered, or the provider type is in
+                ``ADDRESSED_PROVIDER_TYPES`` and its integration carries no remote URL, so a client
+                would fall back to another company's endpoint.
         """
         super().clean()
+
+        if not self.provider_type:
+            raise ValidationError(
+                {"provider_type": "Say which API dialect this endpoint speaks. Nothing can address it otherwise."}
+            )
 
         if self.provider_type in ADDRESSED_PROVIDER_TYPES:
             validate_remote_url(
@@ -211,7 +223,7 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
         help_text=(
             "Extra request parameters to send with every call to this model, as a JSON object. "
             "Only the keys on this app's allowlist are accepted, so that nothing here can change "
-            "which host answers."
+            "which host answers. The contents of extra_body are passed through unchecked."
         ),
     )
 
@@ -233,9 +245,12 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
         Checked again in :attr:`resolved_parameters`, because a fixture, a data migration, or a
         direct ORM write never runs this method.
 
+        ``temperature`` is checked against the same range as the column of the same name, so that
+        the JSON field cannot be used to get past the validators on that column.
+
         Raises:
-            ValidationError: The value is not a mapping, or a key is not in
-                ``ALLOWED_MODEL_PARAMETERS``.
+            ValidationError: The value is not a mapping, a key is not in
+                ``ALLOWED_MODEL_PARAMETERS``, or the temperature is not a number in range.
         """
         super().clean()
 
@@ -252,6 +267,19 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
                     )
                 }
             )
+
+        if "temperature" in self.default_parameters:
+            temperature = self.default_parameters["temperature"]
+            if isinstance(temperature, bool) or not isinstance(temperature, (int, float, Decimal)):
+                raise ValidationError({"default_parameters": "The temperature parameter must be a number."})
+            if not MIN_TEMPERATURE <= temperature <= MAX_TEMPERATURE:
+                raise ValidationError(
+                    {
+                        "default_parameters": (
+                            f"The temperature parameter must be between {MIN_TEMPERATURE} and {MAX_TEMPERATURE}."
+                        )
+                    }
+                )
 
     @property
     def is_available(self):
@@ -274,6 +302,15 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
         return self.num_predict if self.num_predict is not None else self.provider.num_predict
 
     @property
+    def _stored_parameters(self):
+        """The raw parameter mapping, or an empty one when the column holds something else.
+
+        Returns:
+            dict: What is in the column, if it is a mapping.
+        """
+        return self.default_parameters if isinstance(self.default_parameters, dict) else {}
+
+    @property
     def resolved_temperature(self):
         """The effective temperature.
 
@@ -286,7 +323,7 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
         # pylint: disable=no-member  # pylint-django cannot resolve the ForeignKey target here.
         if self.temperature is not None:
             return self.temperature
-        from_parameters = (self.default_parameters or {}).get("temperature")
+        from_parameters = self._stored_parameters.get("temperature")
         if from_parameters is not None:
             return from_parameters
         return self.provider.temperature
@@ -298,17 +335,21 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
         Applies the allowlist a second time, dropping any key that got past :meth:`clean`, and
         folds :attr:`resolved_temperature` in as a float so the result is JSON serialisable.
 
+        Never raises. A consuming app and the REST API both read this on a list, so one row that a
+        direct ORM write left unusable must not take the whole response with it.
+
         Returns:
             dict: Allowlisted parameters, ready to send.
         """
-        parameters = {
-            key: value for key, value in (self.default_parameters or {}).items() if key in ALLOWED_MODEL_PARAMETERS
-        }
+        parameters = {key: value for key, value in self._stored_parameters.items() if key in ALLOWED_MODEL_PARAMETERS}
 
         parameters.pop("temperature", None)
-        temperature = self.resolved_temperature
-        if temperature is not None:
-            parameters["temperature"] = float(temperature)
+        try:
+            temperature = self.resolved_temperature
+            if temperature is not None:
+                parameters["temperature"] = float(temperature)
+        except (TypeError, ValueError):
+            pass
 
         return parameters
 

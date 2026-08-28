@@ -56,11 +56,25 @@ refuses to save one without a URL.
 
 ### Providers that existed before this field
 
-The migration that added `provider_type` fills it in from `openai_compatible`. A provider that gave
-the OpenAI shape becomes `openai_compatible`. A provider that did not is **left empty**. The boolean
-records only that the endpoint is not OpenAI-shaped. It says nothing about what the endpoint is
-instead. The app refuses to save an empty value. Thus an operator must answer the next time the
-operator edits the record.
+The migration that added `provider_type` fills it in from `openai_compatible`. It answers for one
+case only.
+
+| Row before the migration | `provider_type` after |
+|---|---|
+| OpenAI-compatible, with a remote URL | `openai_compatible` |
+| OpenAI-compatible, no remote URL | empty |
+| Not OpenAI-compatible | empty |
+
+The boolean records only that an endpoint is OpenAI-shaped. It says nothing about what a row that
+is not OpenAI-shaped speaks instead, so the migration leaves that row empty.
+
+The `openai_compatible` dialect needs a remote URL, so the migration does not give it to a row that
+has none. Such a row is left empty too. Otherwise the next save would fail over the External
+Integration, a field that the operator did not touch.
+
+The app refuses to save an empty value. Thus an operator must answer the next time the operator
+edits the record. The form shows an empty option for such a row, so no save can write a dialect
+that nobody chose.
 
 ## How to take a provider out of service
 

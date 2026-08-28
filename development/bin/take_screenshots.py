@@ -56,8 +56,6 @@ DETAIL_VIEWS = (
     ("mcp-tool-detail", "/plugins/ai-models/mcp-tools/", "get_device"),
 )
 
-REQUIRED_DEMO_RECORDS = "invoke generate-test-data"
-
 
 def log(message):
     """Print a progress line."""
