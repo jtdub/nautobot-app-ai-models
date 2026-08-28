@@ -30,17 +30,22 @@ MODELS_ENDPOINT = "/v1/models"
 
 DEFAULT_TIMEOUT_SECONDS = 30
 
-AI_MODEL_FIELDS = (
+AI_MODEL_DEFAULT_COLUMNS = (
     "name",
     "provider",
     "description",
     "kind",
     "enabled",
+)
+
+AI_MODEL_NUMERIC_FIELDS = (
     "num_predict",
     "temperature",
     "input_cost_per_million",
     "output_cost_per_million",
 )
+
+AI_MODEL_FIELDS = (*AI_MODEL_DEFAULT_COLUMNS, *AI_MODEL_NUMERIC_FIELDS)
 
 MCP_SERVER_OPERATOR_FIELDS = (
     "name",

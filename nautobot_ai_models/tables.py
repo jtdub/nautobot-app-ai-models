@@ -5,6 +5,7 @@ from nautobot.apps.tables import BaseTable, BooleanColumn, ButtonsColumn, Linked
 
 from nautobot_ai_models import models
 from nautobot_ai_models.constants import (
+    AI_MODEL_DEFAULT_COLUMNS,
     AI_MODEL_FIELDS,
     MCP_SERVER_DISCOVERED_COLUMNS,
     MCP_SERVER_OPERATOR_FIELDS,
@@ -80,15 +81,7 @@ class AIModelTable(BaseTable):
 
         model = models.AIModel
         fields = ("pk", *AI_MODEL_FIELDS, "default_parameters", "actions")
-        default_columns = (
-            "pk",
-            "name",
-            "provider",
-            "description",
-            "kind",
-            "enabled",
-            "actions",
-        )
+        default_columns = ("pk", *AI_MODEL_DEFAULT_COLUMNS, "actions")
 
 
 MCP_TOOL_COLUMNS = (*MCP_TOOL_DEFINITION_FIELDS, "last_seen_at")
