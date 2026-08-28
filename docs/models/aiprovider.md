@@ -1,45 +1,44 @@
 # AI Provider
 
-An AI Provider records one remote LLM endpoint. It does not store a URL, a header, a TLS setting,
-or a credential. A related Nautobot [External Integration](https://docs.nautobot.com/projects/core/en/stable/user-guide/platform-functionality/externalintegration/)
-owns all of those. This app performs no inference. It only catalogs what is available.
+An AI Provider records one remote LLM endpoint. It does not keep a URL, a header, a TLS setting, or
+a credential. A related Nautobot [External Integration](https://docs.nautobot.com/projects/core/en/stable/user-guide/platform-functionality/externalintegration/)
+owns all of those. This app does no inference. It only makes a catalog of what is available.
 
 Each AI Provider owns zero or more [AI Models](aimodel.md).
 
-The model class is `AIProvider`, not `Provider`. Nautobot core already defines
-`circuits.Provider`, and one unqualified name for two things confuses both a reader and an
-import.
+The class is `AIProvider`, not `Provider`. Nautobot core already has `circuits.Provider`. One
+unqualified name for two things confuses a reader and an import.
 
 ## Fields
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Unique name for the provider. |
-| `description` | string | no | Free-text description. |
-| `external_integration` | foreign key to `extras.ExternalIntegration` | yes | Supplies the remote URL, headers, TLS settings, timeout, and credentials. Protected: Nautobot refuses to delete an External Integration a Provider still uses. |
-| `provider_type` | choice | yes | Which API dialect this endpoint speaks: `openai`, `anthropic`, `openai_compatible`, or `ollama`. Default `openai`. A consuming app reads this to decide how to address the provider. |
-| `openai_compatible` | boolean | yes | The endpoint serves the OpenAI API shape, including `GET /v1/models`. Default `True`. The **Discover AI Models** job runs only against providers where this is true. |
-| `enabled` | boolean | yes | Whether this provider is in service. Default `True`. Discovery skips a disabled provider, and any app reading this registry should skip one too. |
-| `num_predict` | integer | no | Default maximum number of tokens to generate. `-1` means unlimited. An AI Model may override it. |
-| `temperature` | decimal | no | Default sampling temperature, between 0 and 2. An AI Model may override it. |
+| `name` | string | yes | The unique name of the provider. |
+| `description` | string | no | Free text. |
+| `external_integration` | foreign key to `extras.ExternalIntegration` | yes | Gives the remote URL, the headers, the TLS settings, the timeout, and the credentials. Protected: Nautobot refuses to delete an External Integration that a provider uses. |
+| `provider_type` | choice | yes | The API dialect of this endpoint: `openai`, `anthropic`, `openai_compatible`, or `ollama`. The default is `openai`. A consuming app reads this field to find out how to address the provider. |
+| `openai_compatible` | boolean | yes | The endpoint gives the OpenAI API shape, which includes `GET /v1/models`. The default is `True`. The **Discover AI Models** job runs only against a provider that has this flag set. |
+| `enabled` | boolean | yes | Whether this provider is in service. The default is `True`. Discovery skips a disabled provider. An app that reads this registry must also skip one. |
+| `num_predict` | integer | no | The default maximum number of tokens to generate. `-1` means unlimited. An AI Model can override it. |
+| `temperature` | decimal | no | The default sampling temperature, from 0 to 2. An AI Model can override it. |
 
 ## Provider type and OpenAI-compatible
 
-The two fields answer different questions, and both are needed.
+The two fields answer different questions. You need both.
 
-- `openai_compatible` asks **can models be discovered here**. The **Discover AI Models** job reads
-  it, because `GET /v1/models` is the only discovery endpoint this app knows.
-- `provider_type` asks **how is this endpoint addressed**. A consuming app reads it before it sends
-  anything.
+- `openai_compatible` answers **can this app discover models here**. The **Discover AI Models** job
+  reads it, because `GET /v1/models` is the only discovery endpoint this app knows.
+- `provider_type` answers **how does a client address this endpoint**. A consuming app reads it
+  before the app sends anything.
 
-Ollama makes the difference concrete. Ollama serves an OpenAI-compatibility layer, so
-`openai_compatible` is a true statement about it. That layer does not return tool calls in the
-`tool_calls` field: a model asked for a tool writes the JSON call into the message content, where
-nothing can act on it. Its native API does return them. An app that read only the boolean would
-address Ollama over the compatibility layer and silently lose tool calling. Recording
-`provider_type = ollama` and `openai_compatible = True` states both facts.
+Ollama shows the difference. Ollama gives an OpenAI-compatibility layer, so `openai_compatible` is
+a true statement about Ollama. But that layer does not return tool calls in the `tool_calls` field.
+A model that gets a request for a tool writes the JSON call into the message content, where nothing
+can act on it. The native Ollama API returns tool calls correctly. An app that reads only the
+boolean addresses Ollama through the compatibility layer and loses tool calling silently. Set
+`provider_type` to `ollama` and `openai_compatible` to `True`. This records both facts.
 
-Two of the four types are an address rather than a service:
+Two of the four types are an address, not a service:
 
 | Type | Needs a remote URL |
 |---|---|
@@ -48,34 +47,40 @@ Two of the four types are an address rather than a service:
 | `openai_compatible` | yes |
 | `ollama` | yes |
 
-A self-hosted vLLM or llama.cpp endpoint has no well-known address. A client that fell back to a
-default endpoint for one would reach somebody else's API, with this provider's credential attached.
-Saving an `openai_compatible` or `ollama` provider whose External Integration carries no remote URL
-is therefore refused.
+A self-hosted vLLM or llama.cpp endpoint has no well-known address.
+
+WARNING: A client with no URL for one of these two types goes to a default endpoint, which is
+another company's API, and sends this provider's credential to it. Give an `openai_compatible` or
+an `ollama` provider an External Integration with a remote URL. The app refuses to save one
+without a URL.
 
 ### Providers that existed before this field
 
-The migration that added `provider_type` fills it in from `openai_compatible`. A provider that
-served the OpenAI shape becomes `openai_compatible`. A provider that did not is **left blank**,
-because the boolean records only that the endpoint is not OpenAI-shaped and says nothing about
-what it is instead. A blank is refused on save, so an operator is asked to answer the next time
-they edit the record.
+The migration that added `provider_type` fills it in from `openai_compatible`. A provider that gave
+the OpenAI shape becomes `openai_compatible`. A provider that did not is **left empty**. The boolean
+records only that the endpoint is not OpenAI-shaped. It says nothing about what the endpoint is
+instead. The app refuses to save an empty value. Thus an operator must answer the next time the
+operator edits the record.
 
-## Taking a provider out of service
+## How to take a provider out of service
 
-Clear `enabled`. A contract lapsing, a self-hosted box going down for maintenance, a rotated key,
-or spend that has to stop now are all provider-level events, and this is the field that records
-them.
+Clear the **Enabled** checkbox. A contract that ends, a self-hosted machine that goes down for
+maintenance, a key that changes, or spend that must stop now are all provider-level events. This
+field records them.
 
-Do not disable each model instead. The **Discover AI Models** job creates models with `enabled`
-set, so a provider taken out of service that way quietly comes back the next time discovery runs.
-Do not delete the provider either: `AIModel.provider` cascades, so deleting the provider deletes
-every model record with it, along with its cost metadata.
+CAUTION: The **Discover AI Models** job creates a model with **Enabled** set. A provider that you
+take out of service one model at a time comes back on the next discovery run. Do not disable each
+model. Clear the flag on the provider.
 
-Read [`AIModel.is_available`](aimodel.md#availability) to ask whether one model is on offer,
-rather than checking both flags.
+CAUTION: `AIModel.provider` cascades. If you delete a provider, you also delete each model record
+on it, together with the cost data. Do not delete a provider that you want to keep. Clear the flag
+on it.
+
+To find out if one model is on offer, read [`AIModel.is_available`](aimodel.md#availability). It
+asks one question in place of two.
 
 ## Credentials
 
-Attach a Secrets Group to the External Integration. Store the API key as a secret of access type
-`HTTP(S)` and secret type `token`. The app reads it at the point of use. It never stores the value.
+Attach a Secrets Group to the External Integration. Keep the API key as a secret with the access
+type `HTTP(S)` and the secret type `token`. The app reads the key at the point of use. It never
+keeps the value.

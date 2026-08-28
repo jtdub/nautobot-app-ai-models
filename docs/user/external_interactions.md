@@ -1,13 +1,14 @@
 # External Interactions
 
-This document describes external dependencies and prerequisites for this App to operate, including system requirements, API endpoints, interconnection or integrations to other applications or services, and similar topics.
+This document describes the external dependencies of the app: the system requirements, the API
+endpoints, and the connections to other applications and services.
 
 ## External System Integrations
 
 ### From the App to Other Systems
 
-The app makes outbound requests only when you run one of its two discovery jobs. Nothing in the
-app calls an LLM for inference, and nothing calls an MCP tool.
+The app makes an outbound request only when you run one of its two discovery jobs. No part of the
+app calls an LLM for inference, and no part calls an MCP tool.
 
 #### Discover AI Models
 
@@ -15,39 +16,40 @@ app calls an LLM for inference, and nothing calls an MCP tool.
 |---|---|
 | Request | `GET <remote_url>/v1/models` |
 | Trigger | The **Discover AI Models** Job, run by a user or on a schedule |
-| Target | Every AI Provider where **OpenAI-compatible** is true |
+| Target | Each enabled AI Provider where **OpenAI-compatible** is true |
 | Response | The OpenAI model catalog, `{"data": [{"id": "...", "owned_by": "..."}]}` |
 
-`GET /v1/models` is the de facto standard model-discovery endpoint. OpenAI, Azure OpenAI, vLLM,
-Ollama, LM Studio, llama.cpp server, Groq, Together, and OpenRouter all serve it. No equivalent
-standard exists for other endpoints, so the job skips a provider that is not OpenAI-compatible.
+`GET /v1/models` is the de facto standard endpoint for model discovery. OpenAI, Azure OpenAI, vLLM,
+Ollama, LM Studio, llama.cpp server, Groq, Together, and OpenRouter all give it. No equivalent
+standard exists for another endpoint, so the job skips a provider that is not OpenAI-compatible.
+The job also skips a disabled provider.
 
-The request settings all come from the provider's External Integration:
+The External Integration of the provider gives each request setting:
 
 | External Integration field | Use |
 |---|---|
-| `remote_url` | The base URL. A trailing `/v1` is not duplicated. |
+| `remote_url` | The base URL. The app does not duplicate a trailing `/v1`. |
 | `headers` | Sent with the request, after Jinja2 rendering. |
-| `secrets_group` | Supplies the API key. See below. |
-| `verify_ssl` | Passed to the HTTP client. |
-| `ca_file_path` | Used in place of `verify_ssl` when set. |
-| `timeout` | Passed to the HTTP client. |
+| `secrets_group` | Gives the API key. See below. |
+| `verify_ssl` | Sent to the HTTP client. |
+| `ca_file_path` | Used in place of `verify_ssl` when it has a value. |
+| `timeout` | Sent to the HTTP client. |
 
 #### MCP Server Discovery
 
 | Property | Value |
 |---|---|
-| Request | An MCP `initialize` handshake, then `tools/list`, paged |
+| Request | An MCP `initialize` handshake, then `tools/list`, in pages |
 | Trigger | The **MCP Server Discovery** Job, run by a user or on a schedule |
-| Target | Every enabled MCP Server whose transport is `streamable-http` |
-| Response | The server's capabilities, its own metadata, and its tool definitions |
+| Target | Each enabled MCP Server whose transport is `streamable-http` |
+| Response | The capabilities of the server, its own metadata, and its tool definitions |
 
-A `stdio` server is a subprocess of its client, so a Nautobot worker cannot reach one, and this
-app speaks no HTTP+SSE. Discovery skips both and says so. Register their tools by hand.
+A `stdio` server is a subprocess of its client, so a Nautobot worker cannot reach one. This app
+does not speak HTTP+SSE. Discovery skips both and says so. Register their tools by hand.
 
-Neither job follows an HTTP redirect to another origin while carrying the integration's
-headers. A credential belongs to the host it was configured for, and a redirect is that host
-naming another one.
+WARNING: A credential belongs to the host that it was configured for, and a redirect is that host
+naming a different one. Neither job obeys an HTTP redirect to another origin while it carries the
+headers of the integration.
 
 This job needs the optional `discovery` extra, which brings the MCP client library:
 
@@ -55,12 +57,12 @@ This job needs the optional `discovery` extra, which brings the MCP client libra
 pip install 'nautobot-ai-models[discovery]'
 ```
 
-Without it the job stops before it contacts anything and names the extra. Every other part of
-the app works without it.
+Without the extra, the job stops before it contacts anything and names the extra. Each other part
+of the app works without it.
 
-The job records what a server advertised. It decides nothing from it. The MCP specification
-requires that a client treat a server's own annotations as untrusted, so `advertised_read_only`
-is stored and shown, and `writable` stays whatever a person set.
+The job records what a server advertised. It decides nothing from it. The MCP specification tells a
+client to treat the annotations of a server as untrusted. Thus the app keeps and shows
+`advertised_read_only`, and `writable` keeps the value that a person set.
 
 ### Credentials
 
@@ -69,13 +71,13 @@ Attach a Secrets Group to the External Integration. Define a secret with:
 - Access type: **HTTP(S)**
 - Secret type: **token**
 
-The job reads that value and sends it as `Authorization: Bearer <token>`. The app never stores the
-value. The job log records the exception type on a failure, never a URL, a header, a token, or a
-response body.
+The job reads that value and sends it as `Authorization: Bearer <token>`. The app never keeps the
+value. On a failure the job log records the exception type. It never records a URL, a header, a
+token, or a response body.
 
 ### From Other Systems to the App
 
-Other systems read the catalog through the REST API. They do not write to it.
+Another system reads the catalog through the REST API. It does not write to the catalog.
 
 ## Nautobot REST API endpoints
 
@@ -86,12 +88,23 @@ Other systems read the catalog through the REST API. They do not write to it.
 | `/api/plugins/ai-models/mcp-servers/` | List and manage MCP Servers |
 | `/api/plugins/ai-models/mcp-tools/` | List and manage MCP Tools |
 
-List every enabled model for one provider:
+List each enabled model of one provider:
 
 ```bash
 curl -s -H "Authorization: Token $NAUTOBOT_TOKEN" \
   "https://nautobot.example.com/api/plugins/ai-models/ai-models/?provider=my-provider&enabled=true"
 ```
+
+List each chat model that is on offer, on an enabled provider:
+
+```bash
+curl -s -H "Authorization: Token $NAUTOBOT_TOKEN" \
+  "https://nautobot.example.com/api/plugins/ai-models/ai-models/?kind=chat&enabled=true&provider__enabled=true"
+```
+
+An AI Model also gives two read-only fields: `is_available`, which is true only when the model and
+its provider are both enabled, and `resolved_parameters`, which is the checked set of request
+parameters to send.
 
 Read one provider with its External Integration expanded:
 
@@ -100,15 +113,15 @@ curl -s -H "Authorization: Token $NAUTOBOT_TOKEN" \
   "https://nautobot.example.com/api/plugins/ai-models/ai-providers/?depth=1"
 ```
 
-List every MCP tool a caller may use without approval:
+List each MCP tool that a caller can use without an approval:
 
 ```bash
 curl -s -H "Authorization: Token $NAUTOBOT_TOKEN" \
   "https://nautobot.example.com/api/plugins/ai-models/mcp-tools/?enabled=true&writable=false"
 ```
 
-Every endpoint accepts the standard Nautobot filters and lookup expressions, for example
+Each endpoint accepts the standard Nautobot filters and lookup expressions, for example
 `?name__ic=llama`.
 
-The fields the MCP discovery job owns are read-only over the API. A client that could change
-them could make the registry claim a server reported something it never did.
+The fields that the MCP discovery job owns are read-only over the API. A client that could change
+them could make the registry claim that a server reported something it never did.

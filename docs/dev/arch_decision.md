@@ -1,4 +1,3 @@
 # Architecture Decision Records
 
-The intention is to document deviations from a standard Model View Controller (MVC) design.
-
+This section records each deviation from a standard Model View Controller (MVC) design.

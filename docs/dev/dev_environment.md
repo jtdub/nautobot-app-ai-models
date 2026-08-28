@@ -2,39 +2,39 @@
 
 ## Quickstart Guide
 
-The development environment can be used in two ways:
+You can use the development environment in two ways:
 
-1. **(Recommended)** All services, including Nautobot, are spun up using Docker containers and a volume mount so you can develop locally.
-2. With a local Poetry environment if you wish to develop outside of Docker, with the caveat of using external services provided by Docker for the database (PostgreSQL by default, MySQL optionally) and Redis services.
+1. **(Recommended)** Docker containers run each service, Nautobot included. A volume mount lets you develop locally.
+2. A local Poetry environment, if you want to develop outside Docker. Docker still gives the database (PostgreSQL by default, MySQL as an option) and Redis.
 
-This is a quick reference guide if you're already familiar with the development environment provided, which you can read more about later in this document.
+This is a quick reference. The rest of this document gives the details.
 
 ### Invoke
 
-The [Invoke](http://www.pyinvoke.org/) library is used to provide some helper commands based on the environment. There are a few configuration parameters which can be passed to Invoke to override the default configuration:
+The [Invoke](http://www.pyinvoke.org/) library gives helper commands for the environment. You can send these parameters to Invoke to override the default configuration:
 
 - `nautobot_ver`: the version of Nautobot to use as a base for any built docker containers (default: 3.1.0)
 - `project_name`: the default docker compose project name (default: `ai-models`)
 - `python_ver`: the version of Python to use as a base for any built docker containers (default: 3.12)
-- `local`: a boolean flag indicating if invoke tasks should be run on the host or inside the docker containers (default: False, commands will be run in docker containers)
+- `local`: a boolean flag. It says whether an invoke task runs on the host or in the Docker containers (default: False, which runs the command in a container)
 - `compose_dir`: the full path to a directory containing the project compose files
 - `compose_files`: a list of compose files applied in order (see [Multiple Compose files](https://docs.docker.com/compose/extends/#multiple-compose-files) for more information)
 - `ephemeral_ports`: Setting this value to `true` and not using any custom compose files will make all Nautobot containers with published ports expose themselves with dynamic ports. This is useful when running multiple Nautobot versions at the same time on the same machine so you won't experience system port conflicts. If setting `compose_files`, this will have no effect so please ensure to manually add the applicable `docker-compose.ephemeral-ports.yml` file or files to your list.
 
-Using **Invoke** these configuration options can be overridden using [several methods](https://docs.pyinvoke.org/en/stable/concepts/configuration.html). Perhaps the simplest is setting an environment variable `INVOKE_NAUTOBOT_AI_MODELS_VARIABLE_NAME` where `VARIABLE_NAME` is the variable you are trying to override. The only exception is `compose_files`, because it is a list it must be overridden in a YAML file. There is an example `invoke.yml` (`invoke.example.yml`) in this directory which can be used as a starting point.
+**Invoke** gives [several methods](https://docs.pyinvoke.org/en/stable/concepts/configuration.html) to override these options. The simplest is an environment variable named `INVOKE_NAUTOBOT_AI_MODELS_VARIABLE_NAME`, where `VARIABLE_NAME` is the option to override. `compose_files` is the one exception. It is a list, so you must override it in a YAML file. Start from the example file `invoke.example.yml` in this directory.
 
 ### Docker Development Environment
 
 !!! tip
     This is the recommended option for development.
 
-This project is managed by [Python Poetry](https://python-poetry.org/) and has a few requirements to setup your development environment:
+[Python Poetry](https://python-poetry.org/) manages this project. Your development environment needs these three things:
 
 1. Install Poetry, see the [Poetry documentation](https://python-poetry.org/docs/#installation) for your operating system.
 2. Install Docker, see the [Docker documentation](https://docs.docker.com/get-docker/) for your operating system.
 3. Install Docker-compose, see the [Docker-compose documentation](https://github.com/docker/compose) for your operation system.
 
-Once you have Poetry and Docker installed you can run the following commands (in the root of the repository) to install all other development dependencies in an isolated Python virtual environment:
+After you install Poetry and Docker, run these commands in the root of the repository. They install the other development dependencies in an isolated Python virtual environment:
 
 ```shell
 poetry self add poetry-plugin-shell
@@ -46,16 +46,20 @@ invoke start
 
 The Nautobot server can now be accessed at [http://localhost:8080](http://localhost:8080) and the live documentation at [http://localhost:8001](http://localhost:8001).
 
-Every `invoke start` and `invoke debug` writes the published host port mappings to `.service_ports.json`, listing only the services that publish a port to the host. When ephemeral ports are enabled, Docker assigns dynamic host ports and this file captures the resulting values; with fixed ports it captures the static values instead. You can also inspect them with `invoke ps` or `docker compose port`, for example `docker compose port nautobot 8080`. To enable ephemeral ports with an environment variable, set `INVOKE_NAUTOBOT_AI_MODELS_EPHEMERAL_PORTS=1`; to disable them, unset the environment variable, set it to an empty value, or set it to `0`.
+`invoke start` and `invoke debug` write the published host port mappings to `.service_ports.json`. The file lists only the services that publish a port to the host. With ephemeral ports, Docker assigns a dynamic host port and the file records it. With fixed ports, the file records the static value.
 
-To either stop or destroy the development environment use the following options.
+You can also read the ports with `invoke ps` or with `docker compose port`, for example `docker compose port nautobot 8080`.
+
+To turn on ephemeral ports, set `INVOKE_NAUTOBOT_AI_MODELS_EPHEMERAL_PORTS=1`. To turn them off, unset the variable, set it to an empty value, or set it to `0`.
+
+Use one of these two commands to stop or to destroy the development environment.
 
 - **invoke stop** - Stop the containers, but keep all underlying systems intact
-- **invoke destroy** - Stop and remove all containers, volumes, etc. (This results in data loss due to the volume being deleted)
+- **invoke destroy** - Stop and remove each container and volume. CAUTION: This deletes the volume, so you lose the data in it.
 
 ### Local Poetry Development Environment
 
-- Create an `invoke.yml` file with the following contents at the root of the repo and edit as necessary
+- Create an `invoke.yml` file at the root of the repository with the contents below. Edit it as necessary.
 
 ```yaml
 ---
@@ -78,7 +82,7 @@ nautobot-server migrate
 !!! note
     If you want to develop on the latest develop branch of Nautobot, run the following command: `poetry add --optional git+https://github.com/nautobot/nautobot@develop`. After the `@` symbol must match either a branch or a tag.
 
-You can now run `nautobot-server` commands as you would from the [Nautobot documentation](https://docs.nautobot.com/projects/core/en/stable/user-guide/administration/tools/nautobot-server/) for example to start the development server:
+You can now run a `nautobot-server` command, as the [Nautobot documentation](https://docs.nautobot.com/projects/core/en/stable/user-guide/administration/tools/nautobot-server/) describes. For example, start the development server:
 
 ```shell
 nautobot-server runserver 0.0.0.0:8080 --insecure
@@ -86,21 +90,21 @@ nautobot-server runserver 0.0.0.0:8080 --insecure
 
 Nautobot server can now be accessed at [http://localhost:8080](http://localhost:8080).
 
-It is typically recommended to launch the Nautobot **runserver** command in a separate shell so you can keep developing and manage the webserver separately.
+Start the Nautobot **runserver** command in a separate shell. You can then continue to develop and manage the web server apart from each other.
 
 ### Updating the Documentation
 
-Documentation dependencies are pinned to exact versions to ensure consistent results. For the development environment, they are defined in the `pyproject.toml` file.
+The documentation dependencies are pinned to exact versions, which gives a consistent result. The `pyproject.toml` file defines them for the development environment.
 
 ### CLI Helper Commands
 
-The project features a CLI helper based on [Invoke](https://www.pyinvoke.org/) to help setup the development environment. The commands are listed below in 3 categories:
+The project has a CLI helper that uses [Invoke](https://www.pyinvoke.org/). It sets up the development environment. The commands are in three categories:
 
 - `dev environment`
 - `utility`
 - `testing`
 
-Each command can be executed with `invoke <command>`. All commands support the arguments `--nautobot-ver` and `--python-ver` if you want to manually define the version of Python and Nautobot to use. Each command also has its own help `invoke <command> --help`
+Run a command with `invoke <command>`. Each command accepts `--nautobot-ver` and `--python-ver` to set the Nautobot and Python versions. Each command has its own help: `invoke <command> --help`.
 
 #### Local Development Environment
 
@@ -136,37 +140,37 @@ Each command can be executed with `invoke <command>`. All commands support the a
 
 ## Project Overview
 
-This project provides the ability to develop and manage the Nautobot server locally (with supporting services being *Dockerized*) or by using only Docker containers to manage Nautobot. The main difference between the two environments is the ability to debug and use **pdb** when developing locally. Debugging with **pdb** within the Docker container is more complicated, but can still be accomplished by either entering into the container (via `docker exec`) or attaching your IDE to the container and running the Nautobot service manually within the container.
+You can manage the Nautobot server locally, with Docker for the supporting services, or you can manage Nautobot in Docker as well. The difference is **pdb**. Locally, you can debug with **pdb** directly. In a container, you must first enter the container with `docker exec`, or attach your IDE to the container and start the Nautobot service by hand.
 
-The upside to having the Nautobot service handled by Docker rather than locally is that you do not have to manage the Nautobot server. The [Docker logs](#docker-logs) provide the majority of the information you will need to help troubleshoot, while getting started quickly and not requiring you to perform several manual steps and remembering to have the Nautobot server running in a separate terminal while you develop.
+Docker has one advantage: you do not manage the Nautobot server. The [Docker logs](#docker-logs) give most of the data that you need to find a problem. You start quickly, you do several fewer manual steps, and you do not keep a separate terminal open for the server.
 
 !!! note
 	The local environment still uses Docker containers for the supporting services (Postgres, Redis, and RQ Worker), but the Nautobot server is handled locally by you, the developer.
 
-Follow the directions below for the specific development environment that you choose.
+Obey the directions below for the development environment that you select.
 
 ## Poetry
 
-Poetry is used in lieu of the "virtualenv" commands and is leveraged in both environments. The virtual environment will provide all of the Python packages required to manage the development environment such as **Invoke**. See the [Local Development Environment](#local-poetry-development-environment) section to see how to install Nautobot if you're going to be developing locally (i.e. not using the Docker container).
+Poetry replaces the "virtualenv" commands, in both environments. The virtual environment gives each Python package that manages the development environment, such as **Invoke**. To install Nautobot for local development, read the [Local Development Environment](#local-poetry-development-environment) section.
 
-The `pyproject.toml` file outlines all of the relevant dependencies for the project:
+The `pyproject.toml` file lists the dependencies of the project:
 
 - `tool.poetry.dependencies` - the main list of dependencies.
-- `tool.poetry.group.dev.dependencies` - development dependencies, to facilitate linting, testing, and documentation building.
+- `tool.poetry.group.dev.dependencies` - the development dependencies, for the lint, the test, and the documentation build.
 
-The `poetry shell` command is used to create and enable a virtual environment managed by Poetry, so all commands ran going forward are executed within the virtual environment. This is similar to running the `source venv/bin/activate` command with virtualenvs. To install project dependencies in the virtual environment, you should run `poetry install` - this will install **both** project and development dependencies.
+The `poetry shell` command creates a virtual environment and enables it. Each command after that runs in the environment. This is the same as `source venv/bin/activate` with a virtualenv. Run `poetry install` to install the dependencies in the environment. It installs **both** the project and the development dependencies.
 
-For more details about Poetry and its commands please check out its [online documentation](https://python-poetry.org/docs/).
+For more about Poetry and its commands, read the [online documentation](https://python-poetry.org/docs/).
 
-In Poetry version 2, the shell command was moved out of the main Poetry project and into a plugin. For more details about the Poetry shell plugin, refer to its [GitHub repository](https://github.com/python-poetry/poetry-plugin-shell).
+Poetry version 2 moved the shell command into a plugin. For more about that plugin, read its [GitHub repository](https://github.com/python-poetry/poetry-plugin-shell).
 
 ## Full Docker Development Environment
 
-This project is set up with a number of **Invoke** tasks consumed as simple CLI commands to get developing fast. You'll use a few `invoke` commands to get your environment up and running.
+This project has a set of **Invoke** tasks. Use them as CLI commands to start your environment quickly.
 
 ### Copy the credentials file for Nautobot
 
-First, you may create/overwrite the `development/creds.env` file - it stores a bunch of private information such as passwords and tokens for your local Nautobot install. You can make a copy of the `development/creds.example.env` and modify it to suit you.
+First, create the `development/creds.env` file. It holds private data, such as the passwords and the tokens of your local Nautobot install. Copy `development/creds.example.env` and edit the copy.
 
 ```shell
 cp development/creds.example.env development/creds.env
@@ -174,7 +178,7 @@ cp development/creds.example.env development/creds.env
 
 ### Invoke - Building the Docker Image
 
-The first thing you need to do is build the necessary Docker image for Nautobot that installs the specific `nautobot_ver`. The image is used for Nautobot and the Celery worker service used by Docker Compose.
+First, build the Docker image for Nautobot. The image installs the version in `nautobot_ver`. Docker Compose uses this image for Nautobot and for the Celery worker service.
 
 ```bash
 ➜ invoke build
@@ -189,7 +193,7 @@ The first thing you need to do is build the necessary Docker image for Nautobot 
 
 ### Invoke - Starting the Development Environment
 
-Next, you need to start up your Docker containers.
+Next, start your Docker containers.
 
 ```bash
 ➜ invoke start
@@ -210,7 +214,7 @@ Creating nautobot_ai_models_worker_1   ... done
 Docker Compose is now in the Docker CLI, try `docker compose up`
 ```
 
-This will start all of the Docker containers used for hosting Nautobot. You should see the following containers running after `invoke start` is finished.
+This starts each Docker container that hosts Nautobot. After `invoke start` finishes, these containers run:
 
 ```bash
 ➜ docker ps
@@ -222,7 +226,7 @@ e72d63129b36   postgres:13-alpine               "docker-entrypoint.s…"   25 se
 96c6ff66997c   redis:6-alpine                   "docker-entrypoint.s…"   25 seconds ago   Up 21 seconds   0.0.0.0:6379->6379/tcp, :::6379->6379/tcp   nautobot_ai_models_redis_1
 ```
 
-Once the containers are fully up, you should be able to open up a web browser, and view:
+After the containers start, open a web browser and go to:
 
 - The Nautobot homepage at [http://localhost:8080](http://localhost:8080)
 - A live version of the documentation at [http://localhost:8001](http://localhost:8001)
@@ -232,7 +236,7 @@ Once the containers are fully up, you should be able to open up a web browser, a
 
 ### Invoke - Creating a Superuser
 
-The Nautobot development image will automatically provision a super user when specifying the following variables within `creds.env` which is the default when copying `creds.example.env` to `creds.env`.
+The Nautobot development image creates a superuser when `creds.env` sets these variables. A copy of `creds.example.env` sets them by default.
 
 - `NAUTOBOT_CREATE_SUPERUSER=true`
 - `NAUTOBOT_SUPERUSER_API_TOKEN=0123456789abcdef0123456789abcdef01234567`
@@ -241,7 +245,7 @@ The Nautobot development image will automatically provision a super user when sp
 !!! note
 	The default username is **admin**, but can be overridden by specifying **NAUTOBOT_SUPERUSER_USERNAME**.
 
-If you need to create additional superusers, run the follow commands.
+To create another superuser, run these commands.
 
 ```bash
 ➜ invoke createsuperuser
@@ -257,7 +261,7 @@ Superuser created successfully.
 
 ### Invoke - Stopping the Development Environment
 
-The last command to know for now is `invoke stop`.
+The last command to learn is `invoke stop`.
 
 ```bash
 ➜ invoke stop
@@ -286,30 +290,30 @@ Removing nautobot_ai_models_nautobot_1 ... done
 Removing network nautobot_ai_models_default
 ```
 
-This will safely shut down all of your running Docker containers for this project. When you are ready to spin containers back up, it is as simple as running `invoke start` again [as seen previously](#invoke-starting-the-development-environment).
+This stops each running Docker container of this project safely. To start them again, run `invoke start`, [as above](#invoke-starting-the-development-environment).
 
 !!! warning
 	If you're wanting to reset the database and configuration settings, you can use the `invoke destroy` command, but **you will lose any data stored in those containers**, so make sure that is what you want to do.
 
 ### Real-Time Updates? How Cool!
 
-Your environment should now be fully setup, all necessary Docker containers are created and running, and you're logged into Nautobot in your web browser. Now what?
+Your environment is now set up. The Docker containers run, and you are signed in to Nautobot in your web browser.
 
-Now you can start developing your app in the project folder!
+You can now develop your app in the project folder.
 
-The magic here is the root directory is mounted inside your Docker containers when built and ran, so **any** changes made to the files in here are directly updated to the Nautobot app code running in Docker. This means that as you modify the code in your app folder, the changes will be instantly updated in Nautobot.
+The root directory is mounted in the Docker containers. Thus **each** change to a file here goes straight to the app code that runs in Docker.
 
 !!! warning
 	There are a few exceptions to this, as outlined in the section [To Rebuild or Not To Rebuild](#to-rebuild-or-not-to-rebuild).
 
-The back-end Django process is setup to automatically reload itself (it only takes a couple of seconds) every time a file is updated (saved). So for example, if you were to update one of the files like `tables.py`, then save it, the changes will be visible right away in the web browser!
+The Django process reloads itself when you save a file. It takes a few seconds. For example, save a change to `tables.py`, and your web browser shows the result at once.
 
 !!! note
 	You may get connection refused while Django reloads, but it should be refreshed fairly quickly.
 
 ### Docker Logs
 
-When trying to debug an issue, one helpful thing you can look at are the logs within the Docker containers.
+To debug a problem, read the logs in the Docker containers.
 
 ```bash
 ➜ docker logs <name of container> -f
@@ -321,21 +325,21 @@ When trying to debug an issue, one helpful thing you can look at are the logs wi
 !!! info
     Want to limit the log output even further? Use the `--tail <#>` command line argument in conjunction with `-f`.
 
-So for example, our app is named `ai-models`, the command would most likely be `docker logs nautobot_ai_models_nautobot_1 -f`. You can find the name of all running containers via `docker ps`.
+This app is named `ai-models`, so the command is usually `docker logs nautobot_ai_models_nautobot_1 -f`. `docker ps` gives the name of each running container.
 
-If you want to view the logs specific to the worker container, simply use the name of that container instead.
+To read the logs of the worker container, use the name of that container.
 
 ## To Rebuild or Not to Rebuild
 
-Most of the time, you will not need to rebuild your images. Simply running `invoke start` and `invoke stop` is enough to keep your environment going.
+Usually you do not rebuild the images. `invoke start` and `invoke stop` are enough.
 
-However there are a couple of instances when you will want to.
+Two cases need a rebuild.
 
 ### Updating Environment Variables
 
-To add environment variables to your containers, thus allowing Nautobot to use them, you will update/add them in the `development/development.env` file. However, doing so is considered updating the underlying container shell, instead of Django (which auto restarts itself on changes).
+To add an environment variable for Nautobot to use, add it to the `development/development.env` file. This changes the container shell, not Django. Django restarts itself on a change; the container shell does not.
 
-To get new environment variables to take effect, you will need stop any running images, rebuild the images, then restart them. This can easily be done with 3 commands:
+To apply a new environment variable, stop the running images, rebuild them, and start them again. Three commands do this:
 
 ```bash
 ➜ invoke stop
@@ -343,17 +347,17 @@ To get new environment variables to take effect, you will need stop any running 
 ➜ invoke start
 ```
 
-Once completed, the new/updated environment variables should now be live.
+The new environment variable is then live.
 
 ### Installing Additional Python Packages
 
-If you want your app to leverage another available Nautobot app or another Python package, you can easily add them into your Docker environment.
+To use another Nautobot app or another Python package, add it to your Docker environment.
 
 ```bash
 ➜ poetry add <package_name>
 ```
 
-Once the dependencies are resolved, stop the existing containers, rebuild the Docker image, and then start all containers again.
+After Poetry resolves the dependencies, stop the containers, rebuild the Docker image, and start the containers again.
 
 ```bash
 ➜ invoke stop
@@ -363,15 +367,15 @@ Once the dependencies are resolved, stop the existing containers, rebuild the Do
 
 ### Installing Additional Nautobot Apps
 
-Let's say for example you want the new app you're creating to integrate into Slack. To do this, you will want to integrate into the existing Nautobot ChatOps App.
+For example, your new app must work with Slack. To do this, use the Nautobot ChatOps App.
 
 ```bash
 ➜ poetry add nautobot-chatops
 ```
 
-Once you activate the virtual environment via Poetry, you then tell Poetry to install the new app.
+Activate the virtual environment with Poetry. Then tell Poetry to install the new app.
 
-Before you continue, you'll need to update the file `development/nautobot_config.py` accordingly with the name of the new app under `PLUGINS` and any relevant settings as necessary for the app under `PLUGINS_CONFIG`. Since you're modifying the underlying OS (not just Django files), you need to rebuild the image. This is a similar process to updating environment variables, which was explained earlier.
+Before you continue, edit `development/nautobot_config.py`. Add the name of the new app to `PLUGINS`, and add its settings to `PLUGINS_CONFIG`. You change the operating system, not only a Django file, so you must rebuild the image. This is the same process as the one for an environment variable above.
 
 ```bash
 ➜ invoke stop
@@ -379,14 +383,14 @@ Before you continue, you'll need to update the file `development/nautobot_config
 ➜ invoke start
 ```
 
-Once the containers are up and running, you should now see the new app installed in your Nautobot instance.
+After the containers start, your Nautobot instance shows the new app.
 
 !!! note
     You can even launch an `ngrok` service locally on your laptop, pointing to port 8080 (such as for chatops development), and it will point traffic directly to your Docker images.
 
 ### Updating Python Version
 
-To update the Python version, you can update it within `tasks.py`.
+To change the Python version, edit `tasks.py`.
 
 ```python
 namespace = Collection("nautobot_ai_models")
@@ -401,11 +405,11 @@ namespace.configure(
 )
 ```
 
-Or set the `INVOKE_NAUTOBOT_AI_MODELS_PYTHON_VER` variable.
+You can also set the `INVOKE_NAUTOBOT_AI_MODELS_PYTHON_VER` variable.
 
 ### Updating Nautobot Version
 
-To update the Nautobot version, you can update it within `tasks.py`.
+To change the Nautobot version, edit `tasks.py`.
 
 ```python
 namespace = Collection("nautobot_ai_models")
@@ -420,7 +424,7 @@ namespace.configure(
 )
 ```
 
-Or set the `INVOKE_NAUTOBOT_AI_MODELS_NAUTOBOT_VER` variable.
+You can also set the `INVOKE_NAUTOBOT_AI_MODELS_NAUTOBOT_VER` variable.
 
 ## Other Miscellaneous Commands To Know
 
@@ -441,7 +445,7 @@ This is the same as running:
 
 ### iPython Shell Plus
 
-Django also has a more advanced shell that uses iPython and that will automatically import all the models:
+Django also has a richer shell. It uses iPython and imports each model for you:
 
 ```bash
 ➜ invoke shell-plus
@@ -456,13 +460,13 @@ This is the same as running:
 
 ### Tests
 
-To run tests against your code, you can run all of the tests that the CI runs against any new PR with:
+To test your code, run each test that CI runs against a new PR:
 
 ```bash
 ➜ invoke tests
 ```
 
-To run an individual test, you can run any or all of the following:
+To run one test, use one of these commands:
 
 ```bash
 ➜ invoke unittest
@@ -472,26 +476,26 @@ To run an individual test, you can run any or all of the following:
 
 ### App Configuration Schema
 
-In the package source, there is the `nautobot_ai_models/app-config-schema.json` file, conforming to the [JSON Schema](https://json-schema.org/) format. This file is used to validate the configuration of the app in CI pipelines.
+The package holds `nautobot_ai_models/app-config-schema.json`, in the [JSON Schema](https://json-schema.org/) format. The CI pipeline uses this file to validate the configuration of the app.
 
-If you make changes to `PLUGINS_CONFIG` or the configuration schema, you can run the following command to validate the schema:
+After you change `PLUGINS_CONFIG` or the schema, run this command to validate the schema:
 
 ```bash
 invoke validate-app-config
 ```
 
-To generate the `app-config-schema.json` file based on the current `PLUGINS_CONFIG` configuration, run the following command:
+To generate `app-config-schema.json` from the current `PLUGINS_CONFIG`, run this command:
 
 ```bash
 invoke generate-app-config-schema
 ```
 
-This command can only guess the schema, so it's up to the developer to manually update the schema as needed.
+The command can only guess the schema. Correct the result by hand.
 
 ### Documentation Screenshots
 
-The images under `docs/images/` and `docs/media/` are captured from a running development instance
-with [Playwright](https://playwright.dev/python/). Refresh them whenever you change the UI, then
+The images under `docs/images/` and `docs/media/` come from a running development instance, through
+[Playwright](https://playwright.dev/python/). Capture them again after you change the UI, then
 commit the new files.
 
 Install the capture tool once. It is not a dependency of the app.
@@ -515,13 +519,13 @@ Then capture:
 python development/bin/take_screenshots.py --url http://localhost:8080
 ```
 
-The script signs in, forces each colour theme through the `theme` and `theme_choice` cookies,
-removes the Django Debug Toolbar, hides the development banner, and writes one file for each view.
-Pass `--username`, `--password`, and `--detail-provider` to change the defaults.
+The script signs in, sets each color theme through the `theme` and `theme_choice` cookies, removes
+the Django Debug Toolbar, hides the development banner, and writes one file for each view. Use
+`--username` and `--password` to change the defaults.
 
-The job-result screenshot needs a **Discover AI Models** job result to exist. Run the job once
-before you capture, against a provider whose endpoint answers `GET /v1/models`.
+The job-result screenshot needs a **Discover AI Models** job result. Before you capture, run the
+job once against a provider whose endpoint answers `GET /v1/models`.
 
-The **Run Discovery** button on an MCP Server detail page only renders when the **MCP Server
-Discovery** job is installed and enabled. Enable it before you capture, or the button is
-missing from the screenshot.
+The **Run Discovery** button on an MCP Server detail page appears only when the **MCP Server
+Discovery** job is installed and enabled. Enable the job before you capture. If you do not, the
+button is missing from the screenshot.

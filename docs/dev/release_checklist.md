@@ -1,6 +1,6 @@
 # Release Checklist
 
-This document is intended for app maintainers and outlines the steps to perform when releasing a new version of the app.
+This document is for an app maintainer. It gives the steps to release a new version of the app.
 
 !!! important
     Before starting, make sure your **local** `develop`, `main`, and (if applicable) the current LTM branch are all up to date with upstream!
@@ -10,39 +10,39 @@ This document is intended for app maintainers and outlines the steps to perform 
     git switch develop && git pull # and repeat for main/ltm
     ```
 
-Choose your own adventure:
+Select the route for your release:
 
-- LTM release? Jump [here](#ltm-releases).
-- Patch release from `develop`? Jump [here](#all-releases-from-develop).
-- Minor release? Continue with [Minor Version Bumps](#minor-version-bumps) and then [All Releases from `develop`](#all-releases-from-develop).
+- For an LTM release, go [here](#ltm-releases).
+- For a patch release from `develop`, go [here](#all-releases-from-develop).
+- For a minor release, do [Minor Version Bumps](#minor-version-bumps), then [All Releases from `develop`](#all-releases-from-develop).
 
 ## Minor Version Bumps
 
 ### Update Requirements
 
-Every minor version release should refresh `poetry.lock`, so that it lists the most recent stable release of each package. To do this:
+Each minor version release must refresh `poetry.lock`, so that the file lists the most recent stable release of each package. To do this:
 
-0. Run `poetry update --dry-run` to have Poetry automatically tell you what package updates are available and the versions it would upgrade to. This requires an existing environment created from the lock file (i.e. via `poetry install`).
-1. Review each requirement's release notes for any breaking or otherwise noteworthy changes.
-2. Run `poetry update <package>` to update the package versions in `poetry.lock` as appropriate.
-3. If a required package requires updating to a new release not covered in the version constraints for a package as defined in `pyproject.toml`, (e.g. `Django ~3.1.7` would never install `Django >=4.0.0`), update it manually in `pyproject.toml`.
-4. Run `poetry install` to install the refreshed versions of all required packages.
-5. Run all tests (`poetry run invoke tests`) and check that the UI and API function as expected.
+0. Run `poetry update --dry-run`. Poetry then names each available package update and the version it would install. This needs an environment that you made from the lock file, with `poetry install`.
+1. Read the release notes of each requirement. Look for a breaking change or another important change.
+2. Run `poetry update <package>` to change the package versions in `poetry.lock`.
+3. A version constraint in `pyproject.toml` can block a new release. For example, `Django ~3.1.7` never installs `Django >=4.0.0`. Change such a constraint by hand in `pyproject.toml`.
+4. Run `poetry install` to install the new versions.
+5. Run each test with `poetry run invoke tests`. Check that the UI and the API work correctly.
 
 ### Update Documentation
 
-If there are any changes to the compatibility matrix (such as a bump in the minimum supported Nautobot version), update it accordingly.
+Update the compatibility matrix if it changes, for example when the minimum supported Nautobot version moves.
 
-Commit any resulting changes from the following sections to the documentation before proceeding with the release.
+Commit each documentation change from the sections below before you continue with the release.
 
 !!! tip
     Fire up the documentation server in your development environment with `poetry run mkdocs serve`! This allows you to view the documentation site locally (the link is in the output of the command) and automatically rebuilds it as you make changes.
 
 ### Verify the Installation and Upgrade Steps
 
-Follow the [installation instructions](../admin/install.md) to perform a new production installation of the app. If possible, also test the [upgrade process](../admin/upgrade.md) from the previous released version.
+Obey the [installation instructions](../admin/install.md) and make a new production installation of the app. If you can, also do a test of the [upgrade process](../admin/upgrade.md) from the last release.
 
-The goal of this step is to walk through the entire install process *as documented* to make sure nothing there needs to be changed or updated, to catch any errors or omissions in the documentation, and to ensure that it is current with each release.
+This step does the whole install process *as the documentation gives it*. It finds an error or an omission in that documentation, and it keeps the documentation current with each release.
 
 ---
 
@@ -50,74 +50,82 @@ The goal of this step is to walk through the entire install process *as document
 
 ### Verify CI Build Status
 
-Ensure that continuous integration testing on the `develop` branch is completing successfully.
+Make sure that the continuous integration tests on the `develop` branch finish correctly.
 
 ### Run the Prepare Release Github Workflow
 
-Run the [Prepare Release](https://github.com/jtdub/nautobot-app-ai-models/actions/workflows/prepare_release.yml) GitHub workflow. Leave the "Use workflow from" option set to the default `develop` branch. Select the version bump type (prerelease, patch, minor, major) that matches the version bump you intend to make for this release. Then enter the branch name to create the release from (default is `main`). You can optionally provide the Date of the release (YYYY-MM-DD), if preparing the release ahead of time, otherwise it will default to the current date. Finally, click "Run workflow" button to execute the workflow.
+Run the [Prepare Release](https://github.com/jtdub/nautobot-app-ai-models/actions/workflows/prepare_release.yml) GitHub workflow.
 
-This workflow will automatically create a release branch from the appropriate branch (If releasing from `main`, it will use `develop` as the starting point), bump the version, and generate the release notes. It will also open a pull request for you to merge the release branch into the target branch with the generated release notes as the PR description.
+1. Keep "Use workflow from" at the default `develop` branch.
+2. Select the version bump type: prerelease, patch, minor, or major.
+3. Enter the branch to release from. The default is `main`.
+4. Enter the date of the release as YYYY-MM-DD, if you prepare the release early. The default is today.
+5. Select **Run workflow**.
+
+The workflow creates a release branch, changes the version, and generates the release notes. A release from `main` starts from `develop`. The workflow also opens a pull request to merge the release branch into the target branch. The generated release notes become the description of that PR.
 
 ### Review and Merge the Release PR
 
-Review the release PR created by the workflow, make any necessary adjustments to the release notes, and merge it once CI has completed and the PR has been approved. If you're releasing a new major or minor version, this will create a new `docs/admin/release_notes/version_{major}.{minor}.md` file. Please fill in the `Release Overview` section in that file manually with a user-friendly summary of the most notable changes!
+Read the release PR that the workflow created. Correct the release notes if you must. Merge the PR after CI finishes and a reviewer approves it.
+
+A new major or minor version creates a new `docs/admin/release_notes/version_{major}.{minor}.md` file. Write the `Release Overview` section of that file by hand. Give a clear summary of the most important changes.
 
 ### Publish the Release
 
-A draft release will automatically be created in GitHub when the Prepare Release workflow is run. Verify the content of the release notes, the tag, and the target branch, then publish the release.
+The Prepare Release workflow creates a draft release in GitHub. Check the release notes, the tag, and the target branch. Then publish the release.
 
 ### Sync the Release Back to `develop`
 
-After a release has been published from the `main` branch, a new PR will automatically be created to merge the changes from `main` back into `develop` with a version bump to the next development version (e.g. `1.4.3a1`). Review and merge this PR once CI has completed and the PR has been approved.
+After you publish a release from `main`, a new PR appears. It merges the changes from `main` back into `develop` and moves the version to the next development version, for example `1.4.3a1`. Read the PR and merge it after CI finishes and a reviewer approves it.
 
 ### Sync the Release to `next`
 
-Publishing a release from the `main` branch will also automatically create a PR to forward-port the released changes from `main` into `next`, so the `next` branch stays up to date.
+A release from `main` also creates a PR that forward-ports the changes from `main` into `next`. The `next` branch then stays current.
 
-If no `next` branch exists, this step is skipped automatically.
+Without a `next` branch, this step does not run.
 
 ## Legacy Documentation for Releases
 
-Please use the above process for all releases going forward, but if you need to refer to the old manual release process for any reason, here are the steps that were previously followed for releases.
+Use the process above for each release. The steps below are the old manual process, kept for reference.
 
 ### Bump the Version
 
-Update the package version using `poetry version` if necessary ([poetry docs](https://python-poetry.org/docs/cli/#version)). This command shows the current version of the project or bumps the version of the project and writes the new version back to `pyproject.toml` if a valid bump rule is provided.
+Change the package version with `poetry version` ([poetry docs](https://python-poetry.org/docs/cli/#version)). The command shows the current version. With a valid bump rule, it changes the version and writes the result to `pyproject.toml`.
 
-The new version must be a valid semver string or a valid bump rule: `patch`, `minor`, `major`, `prepatch`, `preminor`, `premajor`, `prerelease`. Always try to use a bump rule when you can.
+The new version must be a valid semver string or a valid bump rule: `patch`, `minor`, `major`, `prepatch`, `preminor`, `premajor`, or `prerelease`. Use a bump rule where you can.
 
 !!! warning
     This guide uses `1.4.2` as the new version in its examples, so change it to match the version you bumped to in the previous step! Every. single. time. you. copy/paste commands!
 
-Display the current version with no arguments:
+Show the current version with no arguments:
 
 ```no-highlight
 > poetry version
 nautobot-ai-models 1.0.0-beta.2
 ```
 
-Bump pre-release versions using `prerelease`:
+Move a pre-release version with `prerelease`:
 
 ```no-highlight
 > poetry version prerelease
 Bumping version from 1.0.0-beta.2 to 1.0.0-beta.3
 ```
 
-For major versions, use `major`:
+For a major version, use `major`:
 
 ```no-highlight
 > poetry version major
 Bumping version from 1.0.0-beta.2 to 1.0.0
 ```
 
-For minor versions, use `minor`:
+For a minor version, use `minor`:
 
 ```no-highlight
 > poetry version minor
 Bumping version from 1.0.0 to 1.1.0
 ```
 
-And lastly, for patch versions, you guessed it, use `patch`:
+For a patch version, use `patch`:
 
 ```no-highlight
 > poetry version patch
@@ -132,40 +140,40 @@ Bumping version from 1.1.0 to 1.1.1
     - You will need to have the project's poetry environment built at this stage, as the towncrier command runs **locally only**. If you don't have it, run `poetry install` first.
     - You can also set the version explicitly with `invoke generate-release-notes --version 1.4.2` if it needs to be different from what's in `pyproject.toml`.
 
-First, create a release branch off of `develop` (`git switch -c release-1.4.2 develop`) and automatically generate release notes with `invoke generate-release-notes`.
+First, create a release branch from `develop` with `git switch -c release-1.4.2 develop`. Then generate the release notes with `invoke generate-release-notes`.
 
-If you're releasing a new major or minor version, this will create a new `docs/admin/release_notes/version_{major}.{minor}.md` file. Please fill in the `Release Overview` section in that file manually with a user-friendly summary of the most notable changes!
+A new major or minor version creates a new `docs/admin/release_notes/version_{major}.{minor}.md` file. Write the `Release Overview` section of that file by hand. Give a clear summary of the most important changes.
 
-Stage any remaining files (e.g. `git add mkdocs.yml pyproject.toml`) and check the diffs to verify all of the changes are correct (`git diff --cached`). For a new release of `1.4.2`, this will update the release notes in `docs/admin/release_notes/version_1.4.md`, stage that file in git, and `git rm` all the fragments that have now been incorporated into the release notes.
+Stage the remaining files, for example with `git add mkdocs.yml pyproject.toml`. Check each change with `git diff --cached`. A release of `1.4.2` updates the release notes in `docs/admin/release_notes/version_1.4.md`, stages that file, and removes each fragment that is now in the release notes.
 
-Commit `git commit -m "Release v1.4.2"` and `git push` the staged changes.
+Commit the staged changes with `git commit -m "Release v1.4.2"`, then run `git push`.
 
 ### Submit Release Pull Request
 
-Submit a pull request titled `Release v1.4.2` to merge your release branch into `main`. Copy the documented release notes into the pull request's body.
+Open a pull request named `Release v1.4.2` to merge your release branch into `main`. Copy the release notes into the body of the pull request.
 
 !!! important
     Do not squash merge this branch into `main`. Make sure to select `Create a merge commit` when merging in GitHub.
 
-Once CI has completed on the PR, merge it.
+Merge the PR after CI finishes.
 
 ### Create a New Release in GitHub
 
-Draft a [new release](https://github.com/jtdub/nautobot-app-ai-models/releases/new) with the following parameters.
+Draft a [new release](https://github.com/jtdub/nautobot-app-ai-models/releases/new) with these values.
 
 * **Tag:** Input current version (e.g. `v1.4.2`) and select `Create new tag: v1.4.2 on publish`
 * **Target:** `main`
 * **Title:** Version and date (e.g. `v1.4.2 - 2024-04-02`)
 
-Click "Generate Release Notes" and edit the auto-generated content as follows:
+Select "Generate Release Notes". Then edit the generated content:
 
-- Change the entries generated by GitHub to only the usernames of the contributors. e.g. `* Updated dockerfile by @nautobot_user in https://github.com/jtdub/nautobot-app-ai-models/pull/123` -> `* @nautobot_user`.
+- Cut each generated entry down to the username of the contributor. For example, change `* Updated dockerfile by @nautobot_user in https://github.com/jtdub/nautobot-app-ai-models/pull/123` to `* @nautobot_user`.
     - This should give you the list for the new `Contributors` section.
     - Make sure there are no duplicated entries.
-- Replace the content of the `What's Changed` section with the description of changes from the release PR (what towncrier generated).
-- If it exists, leave the `New Contributors` list as it is.
+- Replace the `What's Changed` section with the change description from the release PR, which towncrier generated.
+- Leave the `New Contributors` list as it is, if the list exists.
 
-The release notes should look as follows:
+The release notes then look like this:
 
 ```markdown
 ## What's Changed
@@ -184,15 +192,15 @@ The release notes should look as follows:
 **Full Changelog**: https://github.com/jtdub/nautobot-app-ai-models/compare/v1.4.1...v1.4.2
 ```
 
-Publish the release!
+Publish the release.
 
 ### Create a PR from `main` back to `develop`
 
-First, sync your `main` branch with upstream changes: `git switch main && git pull`.
+First, sync your `main` branch with the upstream changes: `git switch main && git pull`.
 
-Create a new branch from `main` called `release-1.4.2-to-develop` and use `poetry version prerelease` to bump the development version to the next release.
+Create a branch from `main` named `release-1.4.2-to-develop`. Run `poetry version prerelease` to move the development version to the next release.
 
-For example, if you just released `v1.4.2`:
+For example, after a release of `v1.4.2`:
 
 ```no-highlight
 > git switch -c release-1.4.2-to-develop main
@@ -209,39 +217,39 @@ Bumping version from 1.4.2 to 1.4.3a0
 !!! important
     Do not squash merge this branch into `develop`. Make sure to select `Create a merge commit` when merging in GitHub.
 
-Open a new PR from `release-1.4.2-to-develop` against `develop`, wait for CI to pass, and merge it.
+Open a PR from `release-1.4.2-to-develop` against `develop`. Wait for CI to pass, then merge it.
 
 ### Final checks
 
-At this stage, the CI should be running or finished for the `v1.4.2` tag and a package successfully published to PyPI and added into the GitHub Release. Double check that's the case.
+CI now runs, or has finished, for the `v1.4.2` tag. It publishes a package to PyPI and adds it to the GitHub Release. Check that this happened.
 
-Documentation should also have been built for the tag on ReadTheDocs and if you're reading this page online, refresh it and look for the new version in the little version fly-out menu down at the bottom right of the page.
+ReadTheDocs also builds the documentation for the tag. If you read this page online, refresh it and look for the new version in the fly-out menu at the bottom right.
 
-All done!
+The release is complete.
 
 ## LTM Releases
 
-For projects maintaining a Nautobot LTM compatible release, all development and release management is done through the `ltm-x.y` branch. The `x.y` relates to the LTM version of Nautobot it's compatible with, for example `2.4`.
+A project with a Nautobot LTM compatible release does each development and release step on the `ltm-x.y` branch. The `x.y` is the LTM version of Nautobot that the branch works with, for example `2.4`.
 
-The process is similar to [releasing from `develop`](#all-releases-from-develop), but there is no need for post-release branch syncing because you'll release directly from the LTM branch.
+The process is almost the same as a [release from `develop`](#all-releases-from-develop). You release directly from the LTM branch, so no branch sync is necessary afterward.
 
-Once the release has been published, open a separate PR against `develop` to synchronize all LTM release notes into the latest version of the docs for visibility.
+After you publish the release, open a separate PR against `develop`. It copies each LTM release note into the latest documentation, so that a reader can find it.
 
 ### Legacy Documentation for LTM Releases
 
-Please use the automated process for all LTM releases going forward, but if you need to refer to the old manual release process for any reason, here are the steps that were previously followed for LTM releases.
+Use the automated process for each LTM release. The steps below are the old manual process, kept for reference.
 
-1. Make sure your `ltm-2.4` branch is passing CI.
+1. Make sure that CI passes on your `ltm-2.4` branch.
 2. Create a release branch from the `ltm-2.4` branch: `git switch -c release-2.4.99 ltm-2.4`.
-3. Bump up the patch version `poetry version patch`. If you're backporting a feature instead of bugfixes, bump the minor version instead with `poetry version minor`.
+3. Move the patch version with `poetry version patch`. For a backported feature rather than a bug fix, move the minor version with `poetry version minor`.
 4. Generate the release notes: `invoke generate-release-notes --version 2.4.99`.
-5. Move the release notes from the generated `docs/admin/release_notes/version_X.Y.md` to `docs/admin/release_notes/version_2.4.md`.
-6. Add all the changes and `git commit -m "Release v2.4.99"`, then `git push`.
-7. Open a new PR against `ltm-2.4`. Once CI is passing in the PR, `Create a merge commit` (don't squash!).
-8. Create a New Release in GitHub - use the same steps documented [here](#create-a-new-release-in-github) except **UNCHECK THE "Set as the latest release" CHECKBOX** for LTM releases.
-9. Open a separate PR against `develop` to synchronize all LTM release notes into the latest version of the docs for visibility.
+5. Move the release notes from `docs/admin/release_notes/version_X.Y.md` to `docs/admin/release_notes/version_2.4.md`.
+6. Add each change, run `git commit -m "Release v2.4.99"`, then run `git push`.
+7. Open a PR against `ltm-2.4`. After CI passes, select `Create a merge commit`. Do not squash.
+8. Create a new release in GitHub. Use the steps [here](#create-a-new-release-in-github), with one difference: for an LTM release, **clear the "Set as the latest release" checkbox**.
+9. Open a separate PR against `develop`. It copies each LTM release note into the latest documentation.
 
-You can use the following commands to help you pull in the release notes from the `ltm-2.4` branch to the `develop` branch:
+These commands copy the release notes from the `ltm-2.4` branch to the `develop` branch:
 
 ```no-highlight
 > git switch develop
@@ -257,4 +265,4 @@ You can use the following commands to help you pull in the release notes from th
 > git push
 ```
 
-Open a new PR from `release-2.4.99-notes-to-develop` against `develop`, wait for CI to pass, and merge it.
+Open a PR from `release-2.4.99-notes-to-develop` against `develop`. Wait for CI to pass, then merge it.
