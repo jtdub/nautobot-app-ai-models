@@ -85,6 +85,23 @@ class AIModelFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=
         params = {"enabled": False}
         self.assertEqual(self.filterset(params, self.queryset).qs.count(), 1)
 
+    def test_provider_enabled(self):
+        """A consuming app asks for the models on offer in one query."""
+        provider = models.AIProvider.objects.get(name="Test One")
+        provider.enabled = False
+        provider.validated_save()
+
+        params = {"enabled": True, "provider_enabled": True}
+        self.assertEqual(self.filterset(params, self.queryset).qs.count(), 2)
+
+    def test_default_parameters_are_filterable(self):
+        """Nautobot maps a JSONField to a case-insensitive contains filter."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        ai_model.default_parameters = {"seed": 7}
+        ai_model.validated_save()
+
+        self.assertEqual(self.filterset({"default_parameters": ["seed"]}, self.queryset).qs.count(), 1)
+
     def test_kind(self):
         """Split the chat models from the embedding models.
 

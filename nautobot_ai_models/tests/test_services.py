@@ -311,6 +311,30 @@ class DiscoverTest(TestCase):
         self.assertEqual(report.disabled_by_change, ())
         self.assertTrue(models.MCPTool.objects.get(name="get_device").enabled)
 
+    def test_a_hand_entered_tool_is_not_switched_off_on_first_sight(self):
+        """A tool with no fingerprint was never read, so its first reading is not a change.
+
+        A stdio server cannot be discovered, so its tools are entered by hand. One of those on a
+        server that later becomes reachable must not lose the review that was just done on it.
+        """
+        by_hand = models.MCPTool.objects.create(
+            mcp_server=self.server,
+            name="get_device",
+            description="get_device description",
+            input_schema={"type": "object"},
+            enabled=True,
+            writable=False,
+        )
+        self.assertEqual(by_hand.definition_fingerprint, "")
+        self.assertIsNone(by_hand.last_seen_at)
+
+        report = self._discover([tool("get_device")], disable_on_definition_change=True)
+
+        by_hand.refresh_from_db()
+        self.assertEqual(report.disabled_by_change, ())
+        self.assertTrue(by_hand.enabled)
+        self.assertFalse(by_hand.writable)
+
     def test_an_already_disabled_tool_is_not_reported_as_newly_disabled(self):
         """Re-reporting a tool that was already off trains an operator to ignore the warning."""
         self._discover([tool("get_device")])

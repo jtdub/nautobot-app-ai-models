@@ -34,6 +34,7 @@ class DiscoverAIModels(Job):
         required=False,
         label="AI Provider",
         description="Limit discovery to one provider. Leave empty to run against every enabled provider.",
+        query_params={"enabled": True},
     )
     enable_new_models = BooleanVar(
         default=True,

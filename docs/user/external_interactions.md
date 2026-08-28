@@ -105,6 +105,9 @@ curl -s -H "Authorization: Token $NAUTOBOT_TOKEN" \
 An AI Model also gives two read-only fields. `is_available` is true only when the model and its
 provider are both enabled. `resolved_parameters` is the checked set of request parameters to send.
 
+The `provider_enabled` filter asks the same question as `is_available` over the API, because a
+read-only field cannot be a filter.
+
 Read one provider with its External Integration expanded:
 
 ```bash

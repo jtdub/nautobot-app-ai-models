@@ -9,6 +9,14 @@ from nautobot_ai_models.choices import AIModelKindChoices, AIProviderTypeChoices
 from nautobot_ai_models.models import AIModel, AIProvider, MCPServer, MCPTool
 from nautobot_ai_models.services.mcp import ToolDefinition, definition_fingerprint
 
+RETIRED_NAMES = (
+    "Demo OpenAI",
+    "Demo Ollama",
+    "Demo Custom",
+    "Demo MCP Gateway",
+    "Demo MCP Local",
+)
+
 INTEGRATIONS = (
     ("AI Models Demo Integration", "https://llm.example.com/v1"),
     ("Ollama Lab Integration", "https://ollama.lab.example.com"),
@@ -276,14 +284,17 @@ class Command(BaseCommand):
     def _flush(self, db):
         """Delete every object _generate_static_data creates.
 
+        The names from before this app renamed its demonstration records are deleted too. The
+        integrations are shared and protected, so a surviving old provider would block them.
+
         Args:
             db: The database alias to delete from.
         """
-        server_names = [spec["name"] for spec in MCP_SERVERS]
+        server_names = [spec["name"] for spec in MCP_SERVERS] + list(RETIRED_NAMES)
         MCPTool.objects.using(db).filter(mcp_server__name__in=server_names).delete()
         MCPServer.objects.using(db).filter(name__in=server_names).delete()
 
-        provider_names = [spec["name"] for spec in PROVIDERS]
+        provider_names = [spec["name"] for spec in PROVIDERS] + list(RETIRED_NAMES)
         AIModel.objects.using(db).filter(provider__name__in=provider_names).delete()
         AIProvider.objects.using(db).filter(name__in=provider_names).delete()
 

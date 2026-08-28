@@ -12,13 +12,9 @@ from django.db import models
 from nautobot.apps.constants import CHARFIELD_MAX_LENGTH
 from nautobot.apps.models import OrganizationalModel, PrimaryModel, extras_features
 
-from nautobot_ai_models.choices import (
-    ADDRESSED_PROVIDER_TYPES,
-    AIModelKindChoices,
-    AIProviderTypeChoices,
-    MCPTransportChoices,
-)
+from nautobot_ai_models.choices import AIModelKindChoices, AIProviderTypeChoices, MCPTransportChoices
 from nautobot_ai_models.constants import (
+    ADDRESSED_PROVIDER_TYPES,
     ALLOWED_MODEL_PARAMETERS,
     COST_DECIMAL_PLACES,
     COST_MAX_DIGITS,
@@ -228,7 +224,12 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
     )
 
     class Meta:
-        """Meta class."""
+        """Meta class.
+
+        The foreign key comes last in ``unique_together``. Nautobot derives the natural key from
+        the first uniqueness constraint, and a trailing related field is the order that keeps
+        ``natural_key()`` and ``get_by_natural_key()`` correct.
+        """
 
         ordering = ["provider", "name"]
         unique_together = [["name", "provider"]]
@@ -245,6 +246,9 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
         Checked again in :attr:`resolved_parameters`, because a fixture, a data migration, or a
         direct ORM write never runs this method.
 
+        An empty value becomes an empty object. The edit form renders an empty textarea as None,
+        and refusing that would make an optional field impossible to clear.
+
         ``temperature`` is checked against the same range as the column of the same name, so that
         the JSON field cannot be used to get past the validators on that column.
 
@@ -253,6 +257,9 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
                 ``ALLOWED_MODEL_PARAMETERS``, or the temperature is not a number in range.
         """
         super().clean()
+
+        if not self.default_parameters:
+            self.default_parameters = {}
 
         if not isinstance(self.default_parameters, dict):
             raise ValidationError({"default_parameters": "Default parameters must be a JSON object."})

@@ -383,8 +383,11 @@ def _update(tool, definition, fingerprint, now, *, disable_on_change):
     """Refresh what the server says about an existing tool.
 
     ``writable`` is never written here. ``enabled`` is written only when ``disable_on_change`` is
-    set and the fingerprint moved under a tool that was on. The row keeps its schemas, its
-    description, and its review history.
+    set and the fingerprint moved under a tool that was on and that discovery had seen before. The
+    row keeps its schemas, its description, and its review history.
+
+    A tool entered by hand carries no fingerprint and no ``last_seen_at``, so its first sight is a
+    first sight and not a change. Switching one off would undo a review that had just been done.
 
     Args:
         tool: The row to refresh.
@@ -402,7 +405,7 @@ def _update(tool, definition, fingerprint, now, *, disable_on_change):
     if not changed and tool.last_seen_at is not None:
         return False, False
 
-    disabled = changed and disable_on_change and tool.enabled
+    disabled = changed and disable_on_change and tool.enabled and tool.last_seen_at is not None
 
     tool.title = definition.title or ""
     tool.description = definition.description or ""

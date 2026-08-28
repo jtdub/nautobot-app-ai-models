@@ -5,7 +5,7 @@ import json
 from django.core.exceptions import ValidationError
 from django.db.models import ProtectedError
 from django.db.utils import IntegrityError
-from nautobot.apps.testing import ModelTestCases
+from nautobot.apps.testing import ModelTestCases, TestCase
 from nautobot.extras.models import ExternalIntegration
 
 from nautobot_ai_models import models
@@ -186,12 +186,56 @@ class TestAIModel(ModelTestCases.BaseModelTestCase):
         self.assertTrue(ai_model.enabled)
         self.assertFalse(ai_model.is_available)
 
+    def test_a_fraction_of_a_cent_survives(self):
+        """A cheap model is quoted in fractions of a cent per million tokens."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        ai_model.input_cost_per_million = "0.0001"
+        ai_model.validated_save()
+        ai_model.refresh_from_db()
+        self.assertEqual(str(ai_model.input_cost_per_million), "0.0001")
+
+    def test_name_is_unique_per_provider(self):
+        """The same model name may exist under two different providers."""
+        other = models.AIProvider.objects.get(name="Test Three")
+        duplicate = models.AIModel(provider=other, name="Test One")
+        duplicate.validated_save()
+        self.assertEqual(models.AIModel.objects.filter(name="Test One").count(), 2)
+
+    def test_deleting_a_provider_deletes_its_models(self):
+        """The provider foreign key cascades."""
+        provider = models.AIProvider.objects.get(name="Test One")
+        provider.delete()
+        self.assertEqual(models.AIModel.objects.filter(name="Test One").count(), 0)
+
+
+class TestAIModelParameters(TestCase):
+    """The default-parameter allowlist, and the values read back through it.
+
+    A plain TestCase rather than a second BaseModelTestCase: the generic model tests already
+    run against AIModel above, and a second one would run every one of them again.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AIModel model."""
+        fixtures.create_aimodel()
+
     def test_a_parameter_outside_the_allowlist_is_refused(self):
         """`base_url` decides who answers, so it is not a parameter this registry will hold."""
         ai_model = models.AIModel.objects.get(name="Test One")
         ai_model.default_parameters = {"seed": 7, "base_url": "https://attacker.example.com/v1"}
         with self.assertRaises(ValidationError):
             ai_model.validated_save()
+
+    def test_clearing_the_default_parameters_box_is_allowed(self):
+        """The edit form renders an empty textarea as None, and the field is optional."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        for value in (None, "", {}):
+            with self.subTest(value=value):
+                ai_model.default_parameters = value
+                ai_model.validated_save()
+                ai_model.refresh_from_db()
+                self.assertEqual(ai_model.default_parameters, {})
 
     def test_a_temperature_parameter_outside_the_range_is_refused(self):
         """The JSON field must not be a way past the validators on the column of the same name."""
@@ -283,27 +327,6 @@ class TestAIModel(ModelTestCases.BaseModelTestCase):
 
         self.assertIsNone(ai_model.resolved_temperature)
         self.assertEqual(ai_model.resolved_parameters, {"seed": 7})
-
-    def test_a_fraction_of_a_cent_survives(self):
-        """A cheap model is quoted in fractions of a cent per million tokens."""
-        ai_model = models.AIModel.objects.get(name="Test One")
-        ai_model.input_cost_per_million = "0.0001"
-        ai_model.validated_save()
-        ai_model.refresh_from_db()
-        self.assertEqual(str(ai_model.input_cost_per_million), "0.0001")
-
-    def test_name_is_unique_per_provider(self):
-        """The same model name may exist under two different providers."""
-        other = models.AIProvider.objects.get(name="Test Three")
-        duplicate = models.AIModel(provider=other, name="Test One")
-        duplicate.validated_save()
-        self.assertEqual(models.AIModel.objects.filter(name="Test One").count(), 2)
-
-    def test_deleting_a_provider_deletes_its_models(self):
-        """The provider foreign key cascades."""
-        provider = models.AIProvider.objects.get(name="Test One")
-        provider.delete()
-        self.assertEqual(models.AIModel.objects.filter(name="Test One").count(), 0)
 
 
 class TestMCPServer(ModelTestCases.BaseModelTestCase):

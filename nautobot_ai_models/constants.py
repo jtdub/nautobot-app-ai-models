@@ -1,5 +1,7 @@
 """Constants for nautobot_ai_models."""
 
+from nautobot_ai_models.choices import AIProviderTypeChoices
+
 MIN_NUM_PREDICT = -1
 
 MIN_TEMPERATURE = 0
@@ -10,6 +12,11 @@ TEMPERATURE_DECIMAL_PLACES = 2
 COST_MAX_DIGITS = 12
 COST_DECIMAL_PLACES = 4
 MIN_COST = 0
+
+ADDRESSED_PROVIDER_TYPES = (
+    AIProviderTypeChoices.OPENAI_COMPATIBLE,
+    AIProviderTypeChoices.OLLAMA,
+)
 
 ALLOWED_MODEL_PARAMETERS = (
     "extra_body",

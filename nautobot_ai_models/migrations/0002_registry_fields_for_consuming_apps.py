@@ -1,14 +1,18 @@
 """Add the registry fields a consuming app needs. See issues #2, #3, #4 and #5.
 
-Each column is added nullable, filled in, and only then altered to its final shape. Adding a column
-with a default in one step can rewrite the whole table under a lock.
+Each column is added nullable, filled in, and only then altered to its final shape.
+
+The three steps stay in one file because the order is load-bearing. Django's null-to-not-null
+AlterField writes the field default into every row that is still NULL, so an alter that ran before
+the backfill would give every provider the dialect ``openai``, which is the guess that
+fill_in_the_new_columns exists to refuse.
 """
 
 from django.db import migrations, models
 
 
 def fill_in_the_new_columns(apps, schema_editor):
-    """Fill in the four new columns.
+    """Write a value into every row that the AddField steps left empty.
 
     A provider that served the OpenAI shape becomes ``openai_compatible``, but only when its
     integration carries a remote URL. That dialect is an address rather than a service, so
@@ -17,7 +21,14 @@ def fill_in_the_new_columns(apps, schema_editor):
 
     Every other provider is left empty. The boolean says nothing about what a row that was not
     OpenAI-shaped speaks instead, and a guess would send the credential elsewhere. The model
-    refuses an empty value, so an operator answers on the next save.
+    refuses an empty value, and the form offers an empty option for such a row, so an operator
+    answers on the next save.
+
+    The other three columns carry the meaning that every row already had.
+
+    Args:
+        apps: The historical model registry.
+        schema_editor: Unused.
     """
     AIProvider = apps.get_model("nautobot_ai_models", "AIProvider")  # pylint: disable=invalid-name
     AIModel = apps.get_model("nautobot_ai_models", "AIModel")  # pylint: disable=invalid-name
@@ -28,15 +39,6 @@ def fill_in_the_new_columns(apps, schema_editor):
     )
 
     AIModel.objects.update(kind="chat", default_parameters={})
-
-
-def empty_the_new_columns(apps, schema_editor):
-    """Clear the four columns, so the AlterField steps reverse back to nullable."""
-    AIProvider = apps.get_model("nautobot_ai_models", "AIProvider")  # pylint: disable=invalid-name
-    AIModel = apps.get_model("nautobot_ai_models", "AIModel")  # pylint: disable=invalid-name
-
-    AIProvider.objects.update(provider_type=None, enabled=None)
-    AIModel.objects.update(kind=None, default_parameters=None)
 
 
 class Migration(migrations.Migration):
@@ -67,7 +69,7 @@ class Migration(migrations.Migration):
             name="provider_type",
             field=models.CharField(blank=True, db_index=True, max_length=255, null=True),
         ),
-        migrations.RunPython(fill_in_the_new_columns, empty_the_new_columns),
+        migrations.RunPython(fill_in_the_new_columns, migrations.RunPython.noop),
         migrations.AlterField(
             model_name="aimodel",
             name="default_parameters",

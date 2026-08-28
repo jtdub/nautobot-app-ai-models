@@ -38,12 +38,6 @@ class AIProviderTypeChoices(ChoiceSet):
     )
 
 
-ADDRESSED_PROVIDER_TYPES = (
-    AIProviderTypeChoices.OPENAI_COMPATIBLE,
-    AIProviderTypeChoices.OLLAMA,
-)
-
-
 class AIModelKindChoices(ChoiceSet):
     """What a model is for.
 

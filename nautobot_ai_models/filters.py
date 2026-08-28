@@ -3,6 +3,7 @@
 The MCP filter surface is written out rather than generated, because another app codes against it.
 """
 
+from django_filters import BooleanFilter
 from nautobot.apps.filters import (
     MultiValueCharFilter,
     MultiValueDateTimeFilter,
@@ -18,7 +19,6 @@ from nautobot.tenancy.models import Tenant
 
 from nautobot_ai_models import models
 from nautobot_ai_models.constants import (
-    AI_MODEL_FIELDS,
     MCP_SERVER_DISCOVERED_COLUMNS,
     MCP_SERVER_OPERATOR_FIELDS,
     MCP_TOOL_DEFINITION_FIELDS,
@@ -49,12 +49,16 @@ class AIModelFilterSet(NameSearchFilterSet, NautobotFilterSet):  # pylint: disab
         to_field_name="name",
         label="AI Provider (name or ID)",
     )
+    provider_enabled = BooleanFilter(
+        field_name="provider__enabled",
+        label="Provider enabled",
+    )
 
     class Meta:
         """Meta attributes for filter."""
 
         model = models.AIModel
-        fields = ["id", *AI_MODEL_FIELDS]  # pylint: disable=nb-use-fields-all
+        fields = "__all__"
 
 
 class MCPServerFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ancestors
