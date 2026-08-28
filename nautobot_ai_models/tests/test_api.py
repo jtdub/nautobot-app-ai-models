@@ -3,7 +3,7 @@
 from nautobot.apps.testing import APIViewTestCases
 
 from nautobot_ai_models import models
-from nautobot_ai_models.choices import MCPTransportChoices
+from nautobot_ai_models.choices import AIModelKindChoices, AIProviderTypeChoices, MCPTransportChoices
 from nautobot_ai_models.tests import fixtures
 from nautobot_ai_models.tests.scaffolding import RegistryAPIPayloadsMixin
 
@@ -13,7 +13,7 @@ class AIProviderAPIViewTest(RegistryAPIPayloadsMixin, APIViewTestCases.APIViewTe
     """Test the API viewsets for AIProvider."""
 
     model = models.AIProvider
-    choices_fields = ()
+    choices_fields = ["provider_type"]
 
     @classmethod
     def setUpTestData(cls):
@@ -22,8 +22,12 @@ class AIProviderAPIViewTest(RegistryAPIPayloadsMixin, APIViewTestCases.APIViewTe
         fixtures.create_ai_provider()
         integration = fixtures.create_external_integration()
         cls.build_api_payloads(
-            {"external_integration": integration.pk},
-            [{}, {"openai_compatible": False}, {"num_predict": 512}],
+            {"external_integration": integration.pk, "provider_type": AIProviderTypeChoices.OPENAI},
+            [
+                {},
+                {"openai_compatible": False, "provider_type": AIProviderTypeChoices.ANTHROPIC},
+                {"num_predict": 512, "enabled": False},
+            ],
         )
 
 
@@ -32,7 +36,7 @@ class AIModelAPIViewTest(RegistryAPIPayloadsMixin, APIViewTestCases.APIViewTestC
     """Test the API viewsets for AIModel."""
 
     model = models.AIModel
-    choices_fields = ()
+    choices_fields = ["kind"]
 
     @classmethod
     def setUpTestData(cls):
@@ -42,8 +46,28 @@ class AIModelAPIViewTest(RegistryAPIPayloadsMixin, APIViewTestCases.APIViewTestC
         provider = models.AIProvider.objects.get(name="Test Three")
         cls.build_api_payloads(
             {"provider": provider.pk},
-            [{}, {"enabled": False}, {"num_predict": 1024}],
+            [
+                {},
+                {"enabled": False, "kind": AIModelKindChoices.EMBEDDING},
+                {"num_predict": 1024, "default_parameters": {"seed": 7, "top_p": 0.9}},
+            ],
         )
+
+    def test_a_parameter_outside_the_allowlist_is_refused(self):
+        """A key that could change which host answers must not reach the column over the API."""
+        self.add_permissions("nautobot_ai_models.change_aimodel")
+        ai_model = models.AIModel.objects.first()
+
+        response = self.client.patch(
+            self._get_detail_url(ai_model),
+            {"default_parameters": {"base_url": "https://attacker.example.com/v1"}},
+            format="json",
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 400)
+        ai_model.refresh_from_db()
+        self.assertEqual(ai_model.default_parameters, {})
 
 
 class MCPServerAPIViewTest(RegistryAPIPayloadsMixin, APIViewTestCases.APIViewTestCase):

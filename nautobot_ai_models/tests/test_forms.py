@@ -3,7 +3,7 @@
 from nautobot.apps.testing import FormTestCases
 
 from nautobot_ai_models import forms, models
-from nautobot_ai_models.choices import MCPTransportChoices
+from nautobot_ai_models.choices import AIModelKindChoices, AIProviderTypeChoices, MCPTransportChoices
 from nautobot_ai_models.tests import fixtures
 
 
@@ -24,7 +24,9 @@ class AIProviderFormTest(FormTestCases.BaseFormTestCase):
                 "name": "Development",
                 "description": "Development Testing",
                 "external_integration": self.integration.pk,
+                "provider_type": AIProviderTypeChoices.OPENAI,
                 "openai_compatible": True,
+                "enabled": True,
                 "num_predict": 512,
                 "temperature": "0.70",
             }
@@ -38,10 +40,45 @@ class AIProviderFormTest(FormTestCases.BaseFormTestCase):
             data={
                 "name": "Development",
                 "external_integration": self.integration.pk,
+                "provider_type": AIProviderTypeChoices.OPENAI,
             }
         )
         self.assertTrue(form.is_valid(), form.errors)
         self.assertTrue(form.save())
+
+    def test_the_form_offers_an_empty_provider_type(self):
+        """A migrated row carries an empty dialect, and the form must show it as empty.
+
+        Without a blank option the select shows its first choice for such a row, and a save writes
+        the dialect that the migration deliberately refused to guess.
+        """
+        form = forms.AIProviderForm()
+        self.assertIn("", [value for value, _ in form.fields["provider_type"].choices])
+
+    def test_an_empty_provider_type_is_refused_by_the_form(self):
+        """The empty option must not be a way to save a row with no dialect."""
+        form = forms.AIProviderForm(
+            data={
+                "name": "Development",
+                "external_integration": self.integration.pk,
+                "provider_type": "",
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("provider_type", form.errors)
+
+    def test_an_openai_compatible_provider_needs_a_remote_url(self):
+        """That type is an address, not a service. Without a URL a client reaches somebody else."""
+        integration = fixtures.create_external_integration(name="No URL", remote_url="")
+        form = forms.AIProviderForm(
+            data={
+                "name": "Self Hosted",
+                "external_integration": integration.pk,
+                "provider_type": AIProviderTypeChoices.OPENAI_COMPATIBLE,
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("external_integration", form.errors)
 
     def test_name_is_required(self):
         """The name field is required."""
@@ -86,9 +123,11 @@ class AIModelFormTest(FormTestCases.BaseFormTestCase):
                 "provider": self.provider.pk,
                 "name": "gpt-4o-mini",
                 "description": "Small model",
+                "kind": AIModelKindChoices.CHAT,
                 "enabled": True,
                 "num_predict": 1024,
                 "temperature": "1.00",
+                "default_parameters": '{"seed": 7, "top_p": 0.9}',
             }
         )
         self.assertTrue(form.is_valid(), form.errors)
@@ -96,7 +135,9 @@ class AIModelFormTest(FormTestCases.BaseFormTestCase):
 
     def test_specifying_only_required_success(self):
         """A form with only the required fields validates and saves."""
-        form = forms.AIModelForm(data={"provider": self.provider.pk, "name": "gpt-4o-mini"})
+        form = forms.AIModelForm(
+            data={"provider": self.provider.pk, "name": "gpt-4o-mini", "kind": AIModelKindChoices.CHAT}
+        )
         self.assertTrue(form.is_valid(), form.errors)
         self.assertTrue(form.save())
 
@@ -105,6 +146,23 @@ class AIModelFormTest(FormTestCases.BaseFormTestCase):
         form = forms.AIModelForm(data={"name": "gpt-4o-mini"})
         self.assertFalse(form.is_valid())
         self.assertIn("This field is required.", form.errors["provider"])
+
+    def test_a_parameter_outside_the_allowlist_is_rejected(self):
+        """A key that decides who answers must not get past the form.
+
+        `base_url` is the case the allowlist exists for. An operator holding only `change_aimodel`
+        could otherwise point a call at a host of their choosing, credential attached.
+        """
+        form = forms.AIModelForm(
+            data={
+                "provider": self.provider.pk,
+                "name": "gpt-4o-mini",
+                "kind": AIModelKindChoices.CHAT,
+                "default_parameters": '{"base_url": "https://attacker.example.com/v1"}',
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("default_parameters", form.errors)
 
 
 class MCPServerFormTest(FormTestCases.BaseFormTestCase):
@@ -157,11 +215,8 @@ class MCPServerFormTest(FormTestCases.BaseFormTestCase):
     def test_external_integration_offers_embedded_create(self):
         """The "+" button that creates an ExternalIntegration in a modal must stay on.
 
-        Nautobot turns this on for every DynamicModelChoiceField on a NautobotModelForm, so this
-        test guards against somebody turning it off - by adding the field to a
-        `Meta.exclude_embedded_create` list, or by passing `embedded_create=False` - rather than
-        against Nautobot changing. Without it a user has to leave a half-filled form to go and
-        create the integration.
+        Guards against ``Meta.exclude_embedded_create`` or ``embedded_create=False`` turning it
+        off. Without it a user leaves a half-filled form to create the integration.
         """
         form = forms.MCPServerForm()
         self.assertTrue(form.fields["external_integration"].embedded_create)
@@ -181,8 +236,6 @@ class MCPToolFormTest(FormTestCases.BaseFormTestCase):
         form = forms.MCPToolForm(data={"mcp_server": self.server.pk, "name": "get_device"})
         self.assertTrue(form.is_valid(), form.errors)
         tool = form.save()
-        # Both checkboxes were absent from the POST, which is what an unticked box looks like.
-        # The model default does not apply here; the submitted value does.
         self.assertFalse(tool.enabled)
         self.assertFalse(tool.writable)
 
@@ -221,9 +274,7 @@ class MCPServerBulkEditFormTest(FormTestCases.BaseFormTestCase):
 
     def test_transport_offers_a_blank_choice(self):
         """Leaving transport alone has to be expressible."""
-        # A bulk edit form takes the model it edits as its first argument.
         choices = forms.MCPServerBulkEditForm(models.MCPServer).fields["transport"].choices
-        # Nautobot's bulk-update mixin treats None and the empty string alike as "leave it".
         blanks = [value for value, _ in choices if value in (None, "")]
         self.assertTrue(blanks, f"transport offers no blank choice: {list(choices)}")
 

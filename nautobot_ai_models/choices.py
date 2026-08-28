@@ -4,12 +4,7 @@ from nautobot.apps.choices import ChoiceSet
 
 
 class MCPTransportChoices(ChoiceSet):
-    """How a client reaches an MCP server.
-
-    Recorded rather than inferred: a consuming app needs to know which transport to open before it
-    reads anything else off the server, and the discovery job needs it to decide whether the server
-    is reachable from a Nautobot worker at all.
-    """
+    """How a client reaches an MCP server."""
 
     TYPE_STREAMABLE_HTTP = "streamable-http"
     TYPE_SSE = "sse"
@@ -17,10 +12,43 @@ class MCPTransportChoices(ChoiceSet):
 
     CHOICES = (
         (TYPE_STREAMABLE_HTTP, "Streamable HTTP"),
-        # Deprecated by the MCP specification since revision 2025-03-26, and eligible for removal.
-        # Recorded so an existing server can be registered, not because it should be chosen.
         (TYPE_SSE, "HTTP+SSE (deprecated)"),
-        # A stdio server is a subprocess of its client. A Nautobot worker cannot reach one over the
-        # network, so discovery skips it and the tool list has to be entered by hand.
         (TYPE_STDIO, "stdio (not discoverable from Nautobot)"),
+    )
+
+
+class AIProviderTypeChoices(ChoiceSet):
+    """Which API dialect a provider speaks.
+
+    Separate from ``AIProvider.openai_compatible``, which says only whether models can be
+    discovered at the endpoint. Ollama is both OpenAI-compatible and its own dialect, because its
+    compatibility layer does not return tool calls.
+    """
+
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    OPENAI_COMPATIBLE = "openai_compatible"
+    OLLAMA = "ollama"
+
+    CHOICES = (
+        (OPENAI, "OpenAI"),
+        (ANTHROPIC, "Anthropic"),
+        (OPENAI_COMPATIBLE, "OpenAI-compatible"),
+        (OLLAMA, "Ollama (native API)"),
+    )
+
+
+class AIModelKindChoices(ChoiceSet):
+    """What a model is for.
+
+    A chat model and an embedding model are not interchangeable and are not the same endpoint.
+    Discovery cannot tell them apart, so a person sets this.
+    """
+
+    CHAT = "chat"
+    EMBEDDING = "embedding"
+
+    CHOICES = (
+        (CHAT, "Chat"),
+        (EMBEDDING, "Embedding"),
     )

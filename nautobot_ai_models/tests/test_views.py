@@ -3,7 +3,7 @@
 from nautobot.apps.testing import ViewTestCases
 
 from nautobot_ai_models import models
-from nautobot_ai_models.choices import MCPTransportChoices
+from nautobot_ai_models.choices import AIModelKindChoices, AIProviderTypeChoices, MCPTransportChoices
 from nautobot_ai_models.tests import fixtures
 
 
@@ -12,7 +12,7 @@ class AIProviderViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
     """Test the AIProvider views."""
 
     model = models.AIProvider
-    bulk_edit_data = {"description": "Bulk edit views"}
+    bulk_edit_data = {"description": "Bulk edit views", "enabled": False}
 
     @classmethod
     def setUpTestData(cls):
@@ -23,13 +23,17 @@ class AIProviderViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
             "name": "Test 1",
             "description": "Initial model",
             "external_integration": integration.pk,
+            "provider_type": AIProviderTypeChoices.OPENAI,
             "openai_compatible": True,
+            "enabled": True,
         }
         cls.update_data = {
             "name": "Test 2",
             "description": "Updated model",
             "external_integration": integration.pk,
+            "provider_type": AIProviderTypeChoices.ANTHROPIC,
             "openai_compatible": True,
+            "enabled": True,
         }
 
 
@@ -38,7 +42,7 @@ class AIModelViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
     """Test the AIModel views."""
 
     model = models.AIModel
-    bulk_edit_data = {"description": "Bulk edit views"}
+    bulk_edit_data = {"description": "Bulk edit views", "kind": AIModelKindChoices.EMBEDDING}
 
     @classmethod
     def setUpTestData(cls):
@@ -49,13 +53,17 @@ class AIModelViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
             "provider": provider.pk,
             "name": "Test 1",
             "description": "Initial model",
+            "kind": AIModelKindChoices.CHAT,
             "enabled": True,
+            "default_parameters": '{"seed": 7}',
         }
         cls.update_data = {
             "provider": provider.pk,
             "name": "Test 2",
             "description": "Updated model",
+            "kind": AIModelKindChoices.EMBEDDING,
             "enabled": True,
+            "default_parameters": "{}",
         }
 
 

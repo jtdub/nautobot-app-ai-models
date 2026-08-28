@@ -5,6 +5,8 @@ from nautobot.apps.tables import BaseTable, BooleanColumn, ButtonsColumn, Linked
 
 from nautobot_ai_models import models
 from nautobot_ai_models.constants import (
+    AI_MODEL_DEFAULT_COLUMNS,
+    AI_MODEL_FIELDS,
     MCP_SERVER_DISCOVERED_COLUMNS,
     MCP_SERVER_OPERATOR_FIELDS,
     MCP_TOOL_DEFINITION_FIELDS,
@@ -19,6 +21,8 @@ class AIProviderTable(BaseTable):
     name = tables.Column(linkify=True)
     external_integration = tables.Column(linkify=True)
     openai_compatible = BooleanColumn(verbose_name="OpenAI-compatible")
+    provider_type = tables.Column(verbose_name="Provider Type")
+    enabled = BooleanColumn()
     ai_model_count = LinkedCountColumn(
         viewname="plugins:nautobot_ai_models:aimodel_list",
         url_params={"provider": "name"},
@@ -38,7 +42,9 @@ class AIProviderTable(BaseTable):
             "name",
             "description",
             "external_integration",
+            "provider_type",
             "openai_compatible",
+            "enabled",
             "num_predict",
             "temperature",
             "ai_model_count",
@@ -49,7 +55,8 @@ class AIProviderTable(BaseTable):
             "name",
             "description",
             "external_integration",
-            "openai_compatible",
+            "provider_type",
+            "enabled",
             "ai_model_count",
             "actions",
         )
@@ -62,6 +69,7 @@ class AIModelTable(BaseTable):
     pk = ToggleColumn()
     name = tables.Column(linkify=True)
     provider = tables.Column(linkify=True, verbose_name="AI Provider")
+    kind = tables.Column(verbose_name="Kind")
     enabled = BooleanColumn()
     actions = ButtonsColumn(
         models.AIModel,
@@ -72,29 +80,10 @@ class AIModelTable(BaseTable):
         """Meta attributes."""
 
         model = models.AIModel
-        fields = (
-            "pk",
-            "name",
-            "provider",
-            "description",
-            "enabled",
-            "num_predict",
-            "temperature",
-            "input_cost_per_million",
-            "output_cost_per_million",
-            "actions",
-        )
-        default_columns = (
-            "pk",
-            "name",
-            "provider",
-            "description",
-            "enabled",
-            "actions",
-        )
+        fields = ("pk", *AI_MODEL_FIELDS, "default_parameters", "actions")
+        default_columns = ("pk", *AI_MODEL_DEFAULT_COLUMNS, "actions")
 
 
-#: The tool columns: everything about the tool, plus when discovery last saw it.
 MCP_TOOL_COLUMNS = (*MCP_TOOL_DEFINITION_FIELDS, "last_seen_at")
 
 
@@ -119,7 +108,6 @@ class MCPServerTable(BaseTable):
 
         model = models.MCPServer
         fields = ("pk", *MCP_SERVER_OPERATOR_FIELDS, "tool_count", *MCP_SERVER_DISCOVERED_COLUMNS, "actions")
-        # Tenant is off by default: most deployments are not divided that way.
         default_columns = (
             "pk",
             *(field for field in MCP_SERVER_OPERATOR_FIELDS if field != "tenant"),
@@ -138,8 +126,6 @@ class MCPToolTable(BaseTable):
     mcp_server = tables.Column(linkify=True, verbose_name="MCP Server")
     enabled = BooleanColumn()
     writable = BooleanColumn()
-    # Not a BooleanColumn: unset is a third state and means "the server claimed nothing", which is
-    # a different fact from "the server said it writes".
     advertised_read_only = tables.Column(verbose_name="Advertised Read Only")
     actions = ButtonsColumn(models.MCPTool, pk_field="pk")
 
@@ -148,7 +134,6 @@ class MCPToolTable(BaseTable):
 
         model = models.MCPTool
         fields = ("pk", *MCP_TOOL_COLUMNS, "definition_fingerprint", "actions")
-        # Title is off by default: it duplicates the name on most servers.
         default_columns = (
             "pk",
             *(field for field in MCP_TOOL_DEFINITION_FIELDS if field != "title"),

@@ -12,6 +12,8 @@ from nautobot_ai_models.services.exceptions import MCPCallError
 from nautobot_ai_models.tests import fixtures
 from nautobot_ai_models.tests.job_runner import run_job
 
+NOT_GIVEN = object()
+
 
 def catalog_response(names):
     """Return a mock requests response holding an OpenAI-shaped model catalog."""
@@ -37,11 +39,16 @@ class DiscoverAIModelsTest(TransactionTestCase):
         self.job_model.enabled = True
         self.job_model.validated_save()
 
-    def run_discovery(self, enable_new_models=True):
-        """Run the Job against the single test provider."""
+    def run_discovery(self, enable_new_models=True, provider=NOT_GIVEN):
+        """Run the Job against the single test provider, or against all of them.
+
+        Pass `provider=None` for the all-providers path. The sentinel is what lets None mean "every
+        provider" rather than "use the default".
+        """
+        chosen = self.provider if provider is NOT_GIVEN else provider
         return run_job(
             self.job_model,
-            provider=str(self.provider.pk),
+            provider=str(chosen.pk) if chosen is not None else None,
             enable_new_models=enable_new_models,
         )
 
@@ -123,6 +130,30 @@ class DiscoverAIModelsTest(TransactionTestCase):
         mock_get.assert_not_called()
         self.assertEqual(self.provider.ai_models.count(), 0)
         self.assertTrue(any("OpenAI-compatible" in message for message in self.log_messages(job_result)))
+
+    @mock.patch("nautobot_ai_models.discovery.requests.get")
+    def test_a_disabled_provider_named_directly_is_skipped(self, mock_get):
+        """An operator who took a provider out of service is told why nothing happened."""
+        self.provider.enabled = False
+        self.provider.validated_save()
+
+        job_result = self.run_discovery()
+
+        mock_get.assert_not_called()
+        self.assertEqual(self.provider.ai_models.count(), 0)
+        self.assertTrue(any("disabled" in message for message in self.log_messages(job_result)))
+
+    @mock.patch("nautobot_ai_models.discovery.requests.get")
+    def test_a_disabled_provider_is_left_out_of_an_all_providers_run(self, mock_get):
+        """A provider taken out of service must not come back the next time discovery runs."""
+        mock_get.return_value = catalog_response(["gpt-4o-mini"])
+        self.provider.enabled = False
+        self.provider.validated_save()
+
+        self.run_discovery(provider=None)
+
+        self.assertEqual(self.provider.ai_models.count(), 0)
+        self.assertEqual(models.AIModel.objects.filter(provider__enabled=True).count(), 2)
 
     @mock.patch("nautobot_ai_models.discovery.requests.get")
     def test_request_failure_is_reported_without_details(self, mock_get):
@@ -234,7 +265,6 @@ class MCPServerDiscoveryJobTest(TransactionTestCase):
 
         result = self._run()
 
-        # Reported as a failure, but every other server was still attempted.
         self.assertEqual(result.status, "FAILURE")
         self.assertEqual(discover.call_count, 3)
         messages = self._log_messages(result)

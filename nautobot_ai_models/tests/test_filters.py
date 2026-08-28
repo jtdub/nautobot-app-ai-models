@@ -3,6 +3,7 @@
 from nautobot.apps.testing import FilterTestCases
 
 from nautobot_ai_models import filters, models
+from nautobot_ai_models.choices import AIModelKindChoices
 from nautobot_ai_models.tests import fixtures
 from nautobot_ai_models.tests.scaffolding import (
     COMMON_FILTER_TESTS,
@@ -19,6 +20,7 @@ class AIProviderFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disab
         *COMMON_FILTER_TESTS_WITH_DESCRIPTION,
         ("external_integration", "external_integration__id"),
         ("external_integration", "external_integration__name"),
+        ("provider_type",),
     )
 
     @classmethod
@@ -43,6 +45,15 @@ class AIProviderFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disab
         provider.validated_save()
         params = {"openai_compatible": True}
         self.assertEqual(self.filterset(params, self.queryset).qs.count(), self.queryset.count() - 1)
+
+    def test_enabled(self):
+        """A consuming app filters on this before anything else."""
+        provider = models.AIProvider.objects.first()
+        provider.enabled = False
+        provider.validated_save()
+
+        self.assertEqual(self.filterset({"enabled": True}, self.queryset).qs.count(), 2)
+        self.assertEqual(self.filterset({"enabled": False}, self.queryset).qs.count(), 1)
 
 
 class AIModelFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=too-many-ancestors
@@ -73,6 +84,32 @@ class AIModelFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=
         ai_model.validated_save()
         params = {"enabled": False}
         self.assertEqual(self.filterset(params, self.queryset).qs.count(), 1)
+
+    def test_provider_enabled(self):
+        """A consuming app asks for the models on offer in one query."""
+        provider = models.AIProvider.objects.get(name="Test One")
+        provider.enabled = False
+        provider.validated_save()
+
+        params = {"enabled": True, "provider_enabled": True}
+        self.assertEqual(self.filterset(params, self.queryset).qs.count(), 2)
+
+    def test_default_parameters_are_filterable(self):
+        """Nautobot maps a JSONField to a case-insensitive contains filter."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        ai_model.default_parameters = {"seed": 7}
+        ai_model.validated_save()
+
+        self.assertEqual(self.filterset({"default_parameters": ["seed"]}, self.queryset).qs.count(), 1)
+
+    def test_kind(self):
+        """Split the chat models from the embedding models.
+
+        A named test rather than a generic filter test: `AIModelKindChoices` has two values and the
+        generic case wants three distinct ones.
+        """
+        self.assertEqual(self.filterset({"kind": [AIModelKindChoices.EMBEDDING]}, self.queryset).qs.count(), 1)
+        self.assertEqual(self.filterset({"kind": [AIModelKindChoices.CHAT]}, self.queryset).qs.count(), 2)
 
 
 class MCPServerFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=too-many-ancestors

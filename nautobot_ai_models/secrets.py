@@ -1,9 +1,4 @@
-"""Reading credentials out of Nautobot's secrets machinery, in one place.
-
-This app resolves a credential from an ExternalIntegration's secrets group at connection time and
-never anywhere else. The retrieval idiom lives here once, so a change to how a secret is read - a
-new exception type, a different access type - cannot land in one copy only.
-"""
+"""Reading credentials out of Nautobot's secrets machinery, in one place."""
 
 from django.core.exceptions import ObjectDoesNotExist
 from nautobot.apps.choices import SecretsGroupAccessTypeChoices
@@ -11,11 +6,16 @@ from nautobot.apps.exceptions import SecretError
 
 
 def read_secret(integration, secret_type, access_type=SecretsGroupAccessTypeChoices.TYPE_GENERIC):
-    """One secret off an integration's secrets group, or None when it does not carry one.
+    """Read one secret off an integration's secrets group.
 
-    "Not configured" and "configured but unresolvable" both come back as None on purpose: the
-    caller treats a missing secret as "connect without it", and the server the credential was for
-    will refuse the connection itself, which is the visible symptom.
+    Args:
+        integration: The ExternalIntegration to read.
+        secret_type: The secret type to look for.
+        access_type: The access type to look under.
+
+    Returns:
+        str | None: The secret value, or None when the group is missing or the secret cannot be
+            resolved. The caller connects without it and lets the far end refuse.
     """
     if integration.secrets_group is None:
         return None

@@ -17,7 +17,8 @@ Every view is captured twice, once per colour theme, and written as `<name>-ligh
 `<name>-dark.png`. The documentation shows the matching one through the `#only-light` and
 `#only-dark` fragments that mkdocs-material understands.
 
-The instance must already hold demonstration data. See docs/dev/dev_environment.md.
+The instance must already hold the demonstration data that `invoke generate-test-data` creates.
+The names below come from that command. See docs/dev/dev_environment.md.
 """
 
 import argparse
