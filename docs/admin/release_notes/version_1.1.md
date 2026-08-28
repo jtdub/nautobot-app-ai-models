@@ -4,8 +4,50 @@ This document describes all new features and changes in the release. The format 
 
 ## Release Overview
 
-- Major features or milestones
-- Changes to compatibility with Nautobot and/or other apps, libraries etc.
+This release closes the gaps that a consuming app hit when it read this registry and made the calls
+itself. Before it, such an app had to keep facts in its own settings that belong in the catalog.
+
+After it, an app reads one AI Provider record and one AI Model record, and learns four things: how
+to address the endpoint, what the model is for, whether the model is in service, and which
+parameters to send.
+
+### What is new
+
+- **AI Provider** records the API dialect of an endpoint, in `provider_type`. `openai_compatible`
+  keeps its meaning and answers a different question: whether this app can discover models there.
+  Ollama needs both fields, because its compatibility layer gives `GET /v1/models` and still does
+  not return tool calls.
+- **AI Provider** has an `enabled` flag. An operator takes a whole provider out of service in one
+  click. Before, the operator disabled each model, and the discovery job undid that on its next run.
+- **AI Model** records a `kind` of `chat` or `embedding`. The two are not interchangeable, so this
+  app now refuses a wrong configuration before any network traffic.
+- **AI Model** carries the rest of a request in `default_parameters`, behind an allowlist that the
+  app checks on save and again on read.
+- **MCP tool discovery** takes two optional settings. `new_tools_enabled` makes a new tool arrive
+  switched off. `disable_on_definition_change` switches a tool off when its contract moves after a
+  review.
+
+### Compatibility
+
+Nothing changes. This release supports Nautobot 3.1.0 and later, as 1.0 does. It adds no dependency.
+
+### What an upgrade does
+
+The migration adds four columns and fills them in.
+
+Each AI Model becomes a `chat` model with no default parameters, which is what each record already
+meant. Each AI Provider becomes enabled.
+
+`provider_type` is the one field that needs an operator. The migration answers for one case only. A
+provider that was OpenAI-compatible and has a remote URL becomes `openai_compatible`. The migration
+leaves each other provider empty, because the old boolean says nothing about what such an endpoint
+speaks instead.
+
+The app refuses an empty value on save, and the form offers an empty option for such a record. Thus
+no save can write a dialect that nobody chose.
+
+After the upgrade, do two things. Set the dialect on each provider that the migration left empty.
+Set the `kind` of each embedding model.
 
 <!-- towncrier release notes start -->
 
