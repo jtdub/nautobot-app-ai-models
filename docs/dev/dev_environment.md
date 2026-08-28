@@ -145,7 +145,7 @@ You can manage the Nautobot server locally, with Docker for the supporting servi
 Docker has one advantage: you do not manage the Nautobot server. The [Docker logs](#docker-logs) give most of the data that you need to find a problem. You start quickly, you do several fewer manual steps, and you do not keep a separate terminal open for the server.
 
 !!! note
-	The local environment still uses Docker containers for the supporting services (Postgres, Redis, and RQ Worker), but the Nautobot server is handled locally by you, the developer.
+	The local environment still runs the supporting services in Docker: Postgres, Redis, and the RQ Worker. You manage the Nautobot server yourself.
 
 Obey the directions below for the development environment that you select.
 
@@ -293,7 +293,7 @@ Removing network nautobot_ai_models_default
 This stops each running Docker container of this project safely. To start them again, run `invoke start`, [as above](#invoke-starting-the-development-environment).
 
 !!! warning
-	If you're wanting to reset the database and configuration settings, you can use the `invoke destroy` command, but **you will lose any data stored in those containers**, so make sure that is what you want to do.
+	`invoke destroy` resets the database and the configuration settings. **You lose each item of data in those containers.** Use it only when you are sure.
 
 ### Real-Time Updates? How Cool!
 
@@ -519,9 +519,9 @@ Then capture:
 python development/bin/take_screenshots.py --url http://localhost:8080
 ```
 
-The script signs in, sets each color theme through the `theme` and `theme_choice` cookies, removes
-the Django Debug Toolbar, hides the development banner, and writes one file for each view. Use
-`--username` and `--password` to change the defaults.
+The script signs in and sets each color theme through the `theme` and `theme_choice` cookies. It
+removes the Django Debug Toolbar and hides the development banner. It writes one file for each
+view. Use `--username` and `--password` to change the defaults.
 
 The job-result screenshot needs a **Discover AI Models** job result. Before you capture, run the
 job once against a provider whose endpoint answers `GET /v1/models`.

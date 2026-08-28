@@ -49,10 +49,10 @@ Two of the four types are an address, not a service:
 
 A self-hosted vLLM or llama.cpp endpoint has no well-known address.
 
-WARNING: A client with no URL for one of these two types goes to a default endpoint, which is
-another company's API, and sends this provider's credential to it. Give an `openai_compatible` or
-an `ollama` provider an External Integration with a remote URL. The app refuses to save one
-without a URL.
+WARNING: A client with no URL for one of these two types goes to a default endpoint. That endpoint
+is another company's API, and the client sends this provider's credential to it. Give an
+`openai_compatible` or an `ollama` provider an External Integration with a remote URL. The app
+refuses to save one without a URL.
 
 ### Providers that existed before this field
 
@@ -64,9 +64,9 @@ operator edits the record.
 
 ## How to take a provider out of service
 
-Clear the **Enabled** checkbox. A contract that ends, a self-hosted machine that goes down for
-maintenance, a key that changes, or spend that must stop now are all provider-level events. This
-field records them.
+Clear the **Enabled** checkbox. Each of these is a provider-level event, and this field records it:
+a contract that ends, a machine that goes down for maintenance, a key that changes, or spend that
+must stop now.
 
 CAUTION: The **Discover AI Models** job creates a model with **Enabled** set. A provider that you
 take out of service one model at a time comes back on the next discovery run. Do not disable each

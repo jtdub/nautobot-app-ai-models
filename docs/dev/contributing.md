@@ -70,7 +70,7 @@ The standards are:
 
 ### Backporting to Older Releases
 
-To backport a fix to an earlier major or minor version, open an issue, comment on an existing issue, or write in the [Network to Code Slack](https://networktocode.slack.com/), in the `#nautobot` channel.
+To backport a fix to an earlier major or minor version, tell a maintainer. Open an issue, comment on an existing issue, or write in the [Network to Code Slack](https://networktocode.slack.com/), in the `#nautobot` channel.
 
 A maintainer then creates a `release-X.Y` branch for your PR, and makes a new release after the merge.
 

@@ -34,8 +34,8 @@ The weight of 950 is in the data-model band. It is below the default `NavMenuTab
 and just after `NavigationWeightChoices.CLOUD` at 900.
 
 The icon is a static file that this app ships. Nautobot reads an icon string that contains a `/` as
-a static file URL, and a string without one as a name in its own `nautobot-icons` library. That
-library has no three-star icon, so this app includes the `stars` icon from
+a static file URL. It reads a string without one as a name in its own `nautobot-icons` library.
+That library has no three-star icon, so this app includes the `stars` icon from
 [Bootstrap Icons](https://icons.getbootstrap.com/icons/stars/), under the MIT license.
 
 ### How another app joins the tab

@@ -97,8 +97,8 @@ ai_model.resolved_temperature
 ### How to send a parameter that has no field of its own
 
 Put it in **Default parameters** on the model, as a JSON object. Use `seed` for a run that must
-repeat, `reasoning_effort` for a reasoning model, `top_k` and `top_p` for a local model, and
-`extra_body` for anything that a unified client has no name for.
+repeat. Use `reasoning_effort` for a reasoning model. Use `top_k` and `top_p` for a local model.
+Use `extra_body` for anything that a unified client has no name for.
 
 The app accepts only the keys on its allowlist. No key on that list decides which host answers.
 Read the whole set through `ai_model.resolved_parameters`, which applies the allowlist again and
@@ -174,8 +174,8 @@ enabled server. That is the form to schedule.
 
 Discovery records what the server said. It never enables a tool and it never sets `writable`.
 
-A discovered server shows what the operator set, what the server reported about itself, its
-advertised capabilities, its own instructions, and each tool that it offers:
+A discovered server shows five things: what the operator set, what the server reported about
+itself, its advertised capabilities, its own instructions, and each tool that it offers.
 
 ![An MCP Server after discovery](../images/mcp-server-detail-light.png#only-light)
 ![An MCP Server after discovery](../images/mcp-server-detail-dark.png#only-dark)
@@ -292,5 +292,5 @@ headers = integration.render_headers({"obj": tool.mcp_server})
 ### How to find that the contract of a tool changed
 
 `definition_fingerprint` is a digest of the title, the description, and both schemas of the tool.
-Record it beside the approval that you gave. When it differs from the current value, the server
-changed what the tool is after a person reviewed it, and the review is out of date.
+Record it beside the approval that you gave. A difference from the current value means that the
+server changed the tool after a person reviewed it. The review is then out of date.

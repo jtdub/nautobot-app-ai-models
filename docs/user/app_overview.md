@@ -22,13 +22,13 @@ There are four models, in two pairs:
   inference defaults.
 - **MCP Server** — one MCP server. It points at its own External Integration and holds what the
   server reported about itself on the last discovery run.
-- **MCP Tool** — one tool that a server advertises, with both advertised JSON Schemas, a
+- **MCP Tool** — one tool that a server advertises. It holds both advertised JSON Schemas, a
   fingerprint of its contract, and the two flags that a person owns: `enabled` and `writable`.
 
 ## Audience (User Personas) - Who must use this App?
 
-- **Network automation engineers** who want one record, controlled by permissions, of the LLM
-  endpoints, the models, the MCP servers, and the MCP tools that an automation platform can use.
+- **Network automation engineers** who want one record, controlled by permissions, of what an
+  automation platform can use: the LLM endpoints, the models, the MCP servers, and the MCP tools.
 - **Platform administrators** who must add, change, or retire an LLM endpoint without an edit to
   code or to an environment variable.
 - **App developers** who want to read a provider, a model, or a tool from the ORM in place of a

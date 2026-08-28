@@ -95,8 +95,8 @@ examined. Do not change the allowlist to a denylist.
 Each key on the list shapes an answer. No key on the list decides who answers.
 
 The app checks the list when it saves a record, and again when it reads the parameters. Once is not
-enough. A fixture, a data migration, or a direct ORM write does not run model validation, and the
-read side is where an unchecked key would go to a client. Read the parameters through
+enough. A fixture, a data migration, or a direct ORM write does not run model validation. The read
+side is where an unchecked key would go to a client. Read the parameters through
 `resolved_parameters`, which drops anything that is not on the list:
 
 ```python

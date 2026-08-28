@@ -22,13 +22,13 @@ Job, or an external system reads these records and does the work. This keeps the
 available and allowed* apart from the question *how do I call it*.
 
 The app keeps no URL and no credential of its own. Each **AI Provider** points at a Nautobot
-External Integration, which gives the remote URL, the HTTP headers, the SSL verification, the CA
-file path, the timeout, and the Secrets Group. A provider also records its API dialect, so that a
-consuming app knows how to address the endpoint.
+External Integration. That integration gives the remote URL, the HTTP headers, the SSL
+verification, the CA file path, the timeout, and the Secrets Group. A provider also records its
+API dialect, so that a consuming app knows how to address the endpoint.
 
-Each **AI Model** belongs to a provider. It carries a name, a description, a kind of `chat` or
-`embedding`, an enabled flag, the cost of a million tokens, and the parameters to send with a call.
-`num_predict` and `temperature` fall back to the provider default.
+Each **AI Model** belongs to a provider. It carries a name, a description, and a kind of `chat` or
+`embedding`. It also carries an enabled flag, the cost of a million tokens, and the parameters to
+send with a call. `num_predict` and `temperature` fall back to the provider default.
 
 The **Discover AI Models** Job reads `GET /v1/models` from each enabled, OpenAI-compatible provider
 and keeps the model list current. It creates and updates records. It never deletes one.

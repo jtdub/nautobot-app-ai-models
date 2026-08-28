@@ -102,9 +102,8 @@ curl -s -H "Authorization: Token $NAUTOBOT_TOKEN" \
   "https://nautobot.example.com/api/plugins/ai-models/ai-models/?kind=chat&enabled=true&provider__enabled=true"
 ```
 
-An AI Model also gives two read-only fields: `is_available`, which is true only when the model and
-its provider are both enabled, and `resolved_parameters`, which is the checked set of request
-parameters to send.
+An AI Model also gives two read-only fields. `is_available` is true only when the model and its
+provider are both enabled. `resolved_parameters` is the checked set of request parameters to send.
 
 Read one provider with its External Integration expanded:
 
