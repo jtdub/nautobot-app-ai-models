@@ -20,8 +20,6 @@ class AIProviderFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disab
         *COMMON_FILTER_TESTS_WITH_DESCRIPTION,
         ("external_integration", "external_integration__id"),
         ("external_integration", "external_integration__name"),
-        # The fixture gives the three providers three distinct dialects, which is what this
-        # generic test needs.
         ("provider_type",),
     )
 

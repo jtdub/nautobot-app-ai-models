@@ -12,6 +12,8 @@ from nautobot_ai_models.services.exceptions import MCPCallError
 from nautobot_ai_models.tests import fixtures
 from nautobot_ai_models.tests.job_runner import run_job
 
+NOT_GIVEN = object()
+
 
 def catalog_response(names):
     """Return a mock requests response holding an OpenAI-shaped model catalog."""
@@ -37,17 +39,18 @@ class DiscoverAIModelsTest(TransactionTestCase):
         self.job_model.enabled = True
         self.job_model.validated_save()
 
-    def run_discovery(self, enable_new_models=True):
-        """Run the Job against the single test provider."""
+    def run_discovery(self, enable_new_models=True, provider=NOT_GIVEN):
+        """Run the Job against the single test provider, or against all of them.
+
+        Pass `provider=None` for the all-providers path. The sentinel is what lets None mean "every
+        provider" rather than "use the default".
+        """
+        chosen = self.provider if provider is NOT_GIVEN else provider
         return run_job(
             self.job_model,
-            provider=str(self.provider.pk),
+            provider=str(chosen.pk) if chosen is not None else None,
             enable_new_models=enable_new_models,
         )
-
-    def run_discovery_for_all(self):
-        """Run the Job with no provider selected, so it covers every enabled provider."""
-        return run_job(self.job_model, provider=None, enable_new_models=True)
 
     def log_messages(self, job_result):
         """Return every log message the Job wrote."""
@@ -147,10 +150,9 @@ class DiscoverAIModelsTest(TransactionTestCase):
         self.provider.enabled = False
         self.provider.validated_save()
 
-        self.run_discovery_for_all()
+        self.run_discovery(provider=None)
 
         self.assertEqual(self.provider.ai_models.count(), 0)
-        # The other two fixture providers are still enabled, so they were reached.
         self.assertEqual(models.AIModel.objects.filter(provider__enabled=True).count(), 2)
 
     @mock.patch("nautobot_ai_models.discovery.requests.get")
@@ -263,7 +265,6 @@ class MCPServerDiscoveryJobTest(TransactionTestCase):
 
         result = self._run()
 
-        # Reported as a failure, but every other server was still attempted.
         self.assertEqual(result.status, "FAILURE")
         self.assertEqual(discover.call_count, 3)
         messages = self._log_messages(result)

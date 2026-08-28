@@ -1,12 +1,8 @@
 """Test the MCP service layer.
 
-No test here opens a socket. The MCP client is injected as a fake through `discover(client=...)`,
-which is the seam that exists for exactly this.
-
-Several of these reach for a private helper on purpose. `_cause` and `_redirect_safe_client_class`
-are where two of this module's security properties actually live - a failure message that cannot
-carry a credentialled URL, and a redirect that cannot carry a credential off the origin - and a
-test that only exercised them through `discover()` would not pin either one.
+No test opens a socket: the client is injected through ``discover(client=...)``. Some tests reach
+for a private helper, because ``_cause`` and ``_redirect_safe_client_class`` are where two of this
+module's security properties live.
 """
 
 # pylint: disable=protected-access
@@ -27,9 +23,8 @@ from nautobot_ai_models.tests import fixtures
 class TaskGroupError(Exception):
     """An anyio exception group, on every Python this app supports.
 
-    The real one is `ExceptionGroup`, a builtin from Python 3.11, and this app supports 3.10.
-    `_cause()` reads nothing but the `exceptions` attribute, which is what an anyio group exposes
-    and what this carries, so the tests do not need the builtin to exercise the unwrapping.
+    ``ExceptionGroup`` is a builtin from Python 3.11 and this app supports 3.10. ``_cause()`` reads
+    only the ``exceptions`` attribute.
     """
 
     def __init__(self, message, exceptions):
@@ -54,17 +49,6 @@ class FakeClient:  # pylint: disable=too-few-public-methods
         if self.error is not None:
             raise self.error
         return self.info, self.tools
-
-
-def with_policy(**overrides):
-    """Override this app's PLUGINS_CONFIG entry, leaving the shipped defaults in place elsewhere.
-
-    `override_settings(PLUGINS_CONFIG=...)` replaces the whole dictionary, so the defaults
-    Nautobot merged in at start-up have to be restated here or the reader finds nothing.
-    """
-    settings = {"new_tools_enabled": True, "disable_on_definition_change": False}
-    settings.update(overrides)
-    return override_settings(PLUGINS_CONFIG={"nautobot_ai_models": settings})
 
 
 def tool(name, **kwargs):
@@ -192,9 +176,14 @@ class DiscoverTest(TestCase):
         """One reachable server, with nothing discovered on it yet."""
         cls.server = fixtures.create_mcpserver()[0]
 
-    def _discover(self, tools, *, remove_stale=False, info=None):
+    def _discover(self, tools, *, remove_stale=False, info=None, **policy):
         client = FakeClient(info=info, tools=tools)
-        return mcp.discover(self.server, remove_stale=remove_stale, client=client)
+        return mcp.discover(
+            self.server,
+            remove_stale=remove_stale,
+            client=client,
+            policy=mcp.DiscoveryPolicy(**policy) if policy else None,
+        )
 
     def test_disabled_server_is_refused(self):
         """An operator who disabled a server should not find its registry changing underneath them."""
@@ -223,9 +212,7 @@ class DiscoverTest(TestCase):
         self.assertEqual(len(report.added), 1)
         created = models.MCPTool.objects.get(mcp_server=self.server, name="get_device")
         self.assertEqual(created.description, "get_device description")
-        # Recorded, and acted on by nothing.
         self.assertTrue(created.advertised_read_only)
-        # A readOnlyHint of True does not make the tool read-only in this registry.
         self.assertTrue(created.writable)
         self.assertTrue(created.enabled)
         self.assertIsNotNone(created.last_seen_at)
@@ -287,26 +274,23 @@ class DiscoverTest(TestCase):
 
     def test_a_new_tool_can_arrive_switched_off(self):
         """Opt-in. Forty tools nobody has read should not be on offer because a server said so."""
-        with with_policy(new_tools_enabled=False):
-            report = self._discover([tool("get_device", read_only_hint=True)])
+        report = self._discover([tool("get_device", read_only_hint=True)], new_tools_enabled=False)
 
         self.assertEqual(len(report.added), 1)
         created = models.MCPTool.objects.get(mcp_server=self.server, name="get_device")
         self.assertFalse(created.enabled)
-        # `writable` is a separate question and keeps its careful default either way.
         self.assertTrue(created.writable)
 
     def test_a_changed_definition_can_switch_a_tool_off(self):
         """Opt-in. A description that moved is the tool's semantics changing under a review."""
         self._discover([tool("get_device")])
-
-        with with_policy(disable_on_definition_change=True):
-            report = self._discover([tool("get_device", description="something else entirely")])
+        report = self._discover(
+            [tool("get_device", description="something else entirely")], disable_on_definition_change=True
+        )
 
         self.assertEqual([each.name for each in report.disabled_by_change], ["get_device"])
         changed = models.MCPTool.objects.get(name="get_device")
         self.assertFalse(changed.enabled)
-        # The row keeps everything a review produced, so one click puts it back.
         self.assertTrue(changed.writable)
         self.assertEqual(changed.description, "something else entirely")
         self.assertIsNotNone(changed.last_seen_at)
@@ -320,10 +304,9 @@ class DiscoverTest(TestCase):
         self.assertTrue(models.MCPTool.objects.get(name="get_device").enabled)
 
     def test_an_unchanged_definition_is_never_switched_off(self):
-        """The setting acts on a moved fingerprint, not on every pass."""
-        with with_policy(disable_on_definition_change=True):
-            self._discover([tool("get_device")])
-            report = self._discover([tool("get_device")])
+        """The policy acts on a moved fingerprint, not on every pass."""
+        self._discover([tool("get_device")], disable_on_definition_change=True)
+        report = self._discover([tool("get_device")], disable_on_definition_change=True)
 
         self.assertEqual(report.disabled_by_change, ())
         self.assertTrue(models.MCPTool.objects.get(name="get_device").enabled)
@@ -335,8 +318,9 @@ class DiscoverTest(TestCase):
         already_off.enabled = False
         already_off.validated_save()
 
-        with with_policy(disable_on_definition_change=True):
-            report = self._discover([tool("get_device", description="something else entirely")])
+        report = self._discover(
+            [tool("get_device", description="something else entirely")], disable_on_definition_change=True
+        )
 
         self.assertEqual(len(report.definition_changed), 1)
         self.assertEqual(report.disabled_by_change, ())
@@ -349,7 +333,6 @@ class DiscoverTest(TestCase):
         self.assertEqual([tool_.name for tool_ in report.missing], ["set_interface"])
         stale = models.MCPTool.objects.get(name="set_interface")
         self.assertFalse(stale.enabled)
-        # Its description, its schema and its last-seen time are all still there.
         self.assertEqual(stale.description, "set_interface description")
         self.assertIsNotNone(stale.last_seen_at)
 
@@ -382,6 +365,30 @@ class DiscoverTest(TestCase):
             self._discover([tool("get_device"), tool("x" * 1000)])
 
         self.assertEqual(models.MCPTool.objects.filter(mcp_server=self.server).count(), 0)
+
+
+class DiscoveryPolicyTest(TestCase):
+    """The one place that reads PLUGINS_CONFIG.
+
+    Everything else asks for behaviour by passing a policy, so this is what pins the settings to
+    the behaviour they are supposed to produce.
+    """
+
+    def test_the_shipped_defaults_are_todays_behaviour(self):
+        """A deployment that has set nothing must see no change."""
+        policy = mcp.DiscoveryPolicy.from_settings()
+        self.assertTrue(policy.new_tools_enabled)
+        self.assertFalse(policy.disable_on_definition_change)
+        self.assertEqual(policy, mcp.DiscoveryPolicy())
+
+    @override_settings(
+        PLUGINS_CONFIG={"nautobot_ai_models": {"new_tools_enabled": False, "disable_on_definition_change": True}}
+    )
+    def test_settings_are_read(self):
+        """Both keys reach the policy from PLUGINS_CONFIG."""
+        policy = mcp.DiscoveryPolicy.from_settings()
+        self.assertFalse(policy.new_tools_enabled)
+        self.assertTrue(policy.disable_on_definition_change)
 
 
 class FingerprintTest(TestCase):
@@ -420,8 +427,6 @@ def secrets_group_with_token(name="Token Group", value="super-secret-token", sec
         secret_type=secret_type,
         secret=secret,
     )
-    # The provider would read an environment variable. Patching the resolution keeps the test off
-    # the process environment, which is shared state no test should be writing to.
     group.get_secret_value = lambda *args, **kwargs: value
     return group
 
@@ -458,14 +463,9 @@ class ReadSecretTest(TestCase):
 class ErrorReportingTest(TestCase):
     """What a failed discovery says happened.
 
-    Exercised through `discover()` rather than the helper behind it, because the message an operator
-    reads in the Job log is the thing that matters.
-
-    The contract is the exception *types* and nothing else. An HTTP client's own message embeds the
-    request URL, and `ExternalIntegration.remote_url` is free text an operator may well have written
-    a credential into, as `https://user:password@host/mcp` or as a token query parameter. The
-    message ends up in a JobLogEntry, readable by every holder of `extras.view_jobresult` - a wider
-    audience than the one that may read the Secrets Group the credential came from.
+    The contract is the exception types and nothing else. A client's message embeds the request
+    URL, which an operator may have written a credential into, and it reaches a JobLogEntry that a
+    wider audience can read than the Secrets Group it came from.
     """
 
     @classmethod
@@ -516,7 +516,6 @@ class ErrorReportingTest(TestCase):
         error = OSError("innermost")
         for _ in range(20):
             error = TaskGroupError("wrapper", [error])
-        # It stops digging rather than hanging, and still names the wrapper it stopped on.
         self.assertIn(TaskGroupError.__name__, self._message(error))
 
     def test_the_server_is_named(self):
@@ -563,12 +562,8 @@ class RedirectSafeClientTest(TestCase):
             self._headers = headers
 
         def _redirect_headers(self, request, url, method):  # pylint: disable=unused-argument
-            # A real client strips Authorization across origins and keeps everything else,
-            # including headers it set itself rather than taking from the integration.
             return {**self._headers, "User-Agent": "nautobot"}
 
-    #: What `connection_for` put on the client. Any one of these may be the credential, because
-    #: an operator authenticates with whatever header their server expects.
     HEADERS = {"Authorization": "Bearer t", "X-Api-Key": "secret", "Accept": "application/json"}
 
     def build(self):
@@ -583,12 +578,9 @@ class RedirectSafeClientTest(TestCase):
             self.FakeURL("https", "attacker.example", 443),
             "GET",
         )
-        # Every header the integration supplied goes, not only the one that looks like a
-        # credential. Which of them is the credential is the operator's choice, not ours.
         self.assertNotIn("X-Api-Key", headers)
         self.assertNotIn("Authorization", headers)
         self.assertNotIn("Accept", headers)
-        # A header the client set for itself is untouched.
         self.assertEqual(headers["User-Agent"], "nautobot")
 
     def test_a_same_origin_redirect_keeps_them(self):

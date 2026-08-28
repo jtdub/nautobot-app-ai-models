@@ -1,24 +1,10 @@
 """The MCP service layer: the one module in this app that speaks MCP.
 
-This app calls no tool. All this module does is ask a server what it offers and write the answer
-onto the registry. The rules it holds to:
+Asks a server what it offers and writes the answer onto the registry. It calls no tool. The client
+library is imported here only, lazily, behind the optional ``discovery`` extra. A server's own
+annotations are recorded and acted on by nothing.
 
-* The MCP client library is imported only here, lazily, behind the optional ``discovery`` extra. A
-  deployment without it gets a plain ``ImproperlyConfigured`` naming the extra.
-* The endpoint, its headers, its TLS settings and its timeout come from the server's
-  ExternalIntegration at connection time, and the credential from that integration's secrets group.
-  Nothing key-shaped lives in settings, on a model, or in a log line.
-* Discovery owns the fields a server told us about. ``writable`` belongs to a person and is never
-  written here. ``enabled`` belongs to a person too, with three exceptions, all of which only ever
-  turn a tool off: a tool the server stopped advertising, a newly advertised tool when
-  ``new_tools_enabled`` is off, and a tool whose definition moved when
-  ``disable_on_definition_change`` is on. The last two are opt-in and default to today's behaviour.
-* A server's own annotations are recorded and acted on by nothing. The MCP specification requires
-  that a client treat annotations as untrusted, and deciding "this tool is safe" from the claim of
-  the server the claim describes is exactly the decision it forbids.
-
-Moved here from nautobot-app-mcp-models when the two registries merged into one app. The
-tool-calling half is deliberately absent.
+``writable`` is never written here. ``enabled`` is written only to turn a tool off.
 """
 
 import asyncio
@@ -41,27 +27,12 @@ from nautobot_ai_models.services.exceptions import MCPCallError, MCPConfiguratio
 
 logger = logging.getLogger(__name__)
 
-#: How long the read side of a session may wait. The transport keeps a server-sent-event stream
-#: open, so the read deadline is not the request deadline and must not be set from it. Matches what
-#: the SDK's own HTTP client factory uses.
 SSE_READ_TIMEOUT_SECONDS = 300
 
-#: A ceiling on tool-list pages, so a server offering a cursor that never ends cannot hold a worker
-#: open forever. Far above any real tool list.
 MAX_TOOL_PAGES = 50
 
-#: How the credential is presented when the integration's own headers do not present it. Bearer is
-#: what MCP servers over HTTP overwhelmingly expect; an operator who needs something else writes
-#: that header on the integration, and this defers to them.
 AUTHORIZATION_HEADER = "Authorization"
 
-#: Transports this app can open from a Nautobot worker.
-#:
-#: A stdio server is a subprocess of its client, so there is nothing for a worker to connect
-#: to. HTTP+SSE is absent for a different reason: this module speaks streamable HTTP and only
-#: streamable HTTP, so listing SSE here would send every such server through a client that
-#: cannot talk to it, and the operator would get an opaque failure instead of the skip notice
-#: that tells them to enter the tools by hand.
 DISCOVERABLE_TRANSPORTS = (MCPTransportChoices.TYPE_STREAMABLE_HTTP,)
 
 
@@ -69,8 +40,7 @@ DISCOVERABLE_TRANSPORTS = (MCPTransportChoices.TYPE_STREAMABLE_HTTP,)
 class MCPConnection:
     """Everything needed to reach one server, resolved from its integration.
 
-    ``verify`` carries httpx's own convention rather than a pair of fields: True, False, or the
-    path to a CA bundle.
+    ``verify`` follows httpx's convention: True, False, or a path to a CA bundle.
     """
 
     url: str
@@ -79,22 +49,16 @@ class MCPConnection:
     timeout: float = DEFAULT_TIMEOUT_SECONDS
 
     def __repr__(self):
-        """Say everything except the header values, one of which is usually the credential.
-
-        A dataclass renders its whole contents by default, and this one is passed around, held in
-        tracebacks and - with ``DEBUG`` on - rendered onto an error page. The header *names* are
-        worth seeing when something is misconfigured; their values never are.
-        """
+        """Render everything except the header values, one of which is usually the credential."""
         headers = ", ".join(sorted(self.headers))
         return f"MCPConnection(url={self.url!r}, headers=[{headers}], verify={self.verify!r}, timeout={self.timeout!r})"
 
 
 @dataclass(frozen=True)
 class ServerInfo:
-    """What a server said about itself, before this app has any opinion about it.
+    """What a server said about itself.
 
-    Every field is self-reported and unverified. Stored for display and for an operator's
-    debugging, and read by nothing that makes a decision.
+    Every field is self-reported and unverified. Stored for display, read by nothing that decides.
     """
 
     protocol_version: str = ""
@@ -113,8 +77,31 @@ class ToolDefinition:
     description: str = ""
     input_schema: dict = field(default_factory=dict)
     output_schema: dict = field(default_factory=dict)
-    #: The server's own claim that this tool only reads. Recorded and shown; never acted on.
     read_only_hint: bool = None
+
+
+@dataclass(frozen=True)
+class DiscoveryPolicy:
+    """What a discovery pass may do to an operator's ``enabled`` column.
+
+    Resolved once in :func:`discover` and threaded down. ``remove_stale`` is not here: that is a
+    per-run choice, and these two are a standing decision.
+    """
+
+    new_tools_enabled: bool = True
+    disable_on_definition_change: bool = False
+
+    @classmethod
+    def from_settings(cls):
+        """Read the policy out of PLUGINS_CONFIG.
+
+        Returns:
+            DiscoveryPolicy: The configured policy.
+        """
+        return cls(
+            new_tools_enabled=bool(app_setting(NEW_TOOLS_ENABLED)),
+            disable_on_definition_change=bool(app_setting(DISABLE_ON_DEFINITION_CHANGE)),
+        )
 
 
 @dataclass(frozen=True)
@@ -124,9 +111,6 @@ class DiscoveryReport:
     added: tuple = ()
     updated: tuple = ()
     definition_changed: tuple = ()
-    #: The subset of definition_changed this run switched off, under the opt-in policy setting.
-    #: A separate tuple rather than a flag, because an operator reading the log needs to be told
-    #: that a tool stopped being offered, not just that it moved.
     disabled_by_change: tuple = ()
     missing: tuple = ()
     removed: tuple = ()
@@ -147,28 +131,34 @@ class DiscoveryReport:
 
 
 def require_client():
-    """Resolve the client now, so a missing ``discovery`` extra is a refusal rather than a later crash.
+    """Resolve the MCP client now, so a missing ``discovery`` extra fails early.
 
-    The failure is an ``ImproperlyConfigured``, deliberately outside the ``MCPError`` family, so
-    nothing that handles a server being unreachable swallows a deployment that cannot discover at
-    all.
+    Raises:
+        ImproperlyConfigured: The extra is not installed. Deliberately outside ``MCPError``, so a
+            handler for an unreachable server does not swallow it.
     """
     _default_client()
 
 
 def connection_for(server):
-    """Everything the server's ExternalIntegration says about reaching it, read now.
+    """Read everything the server's integration says about reaching it.
 
     The credential becomes an ``Authorization: Bearer`` header unless the integration's own headers
-    already carry an Authorization, in which case the operator has said how this server is
-    authenticated and this defers to them.
+    already carry one.
+
+    Args:
+        server: The MCPServer to connect to.
+
+    Returns:
+        MCPConnection: The resolved connection.
+
+    Raises:
+        MCPConfigurationError: The integration carries no remote URL.
     """
     integration = server.external_integration
 
     url = _rendered(integration, "render_remote_url", server)
     if not url:
-        # `clean()` demands a URL at save time, but an integration is a shared object and can be
-        # blanked afterwards without revalidating what points at it.
         raise MCPConfigurationError(f"MCP server '{server}' has an external integration with no remote URL.")
 
     headers = dict(_rendered(integration, "render_headers", server) or {})
@@ -179,8 +169,6 @@ def connection_for(server):
                 headers[AUTHORIZATION_HEADER] = f"Bearer {token}"
                 break
 
-    # Unticking *Verify SSL* wins over a CA path: an operator who has done both has said not to
-    # verify, and quietly verifying anyway is the surprise this rule exists to prevent.
     if not integration.verify_ssl:
         verify = False
     elif integration.ca_file_path:
@@ -195,19 +183,24 @@ def connection_for(server):
     return MCPConnection(url=url, headers=headers, verify=verify, timeout=timeout)
 
 
-def discover(server, *, remove_stale=False, client=None):
+def discover(server, *, remove_stale=False, client=None, policy=None):
     """Read a server's identity and tool list, and reconcile the registry with it.
 
-    ``client`` is the test seam - an object with ``describe(connection)`` - and nothing outside a
-    test supplies one. No test opens a socket.
+    Args:
+        server: The MCPServer to read.
+        remove_stale: Delete tools the server no longer advertises instead of disabling them.
+        client: The test seam. An object with ``describe(connection)``. Nothing outside a test
+            supplies one.
+        policy: Read from settings when not given.
 
-    Returns a `DiscoveryReport`. Raises `MCPConfigurationError` when the server cannot be reached
-    because of how it is configured, and `MCPCallError` when the server was reached and would not
-    answer usably.
+    Returns:
+        DiscoveryReport: What the pass changed.
+
+    Raises:
+        MCPConfigurationError: The server cannot be reached because of how it is configured.
+        MCPCallError: The server was reached and would not answer usably.
     """
     if not server.enabled:
-        # Reading a disabled server is harmless, and refusing it is still right: an operator who
-        # disabled a server should not find its registry changing underneath them.
         raise MCPConfigurationError(f"MCP server '{server}' is disabled.")
 
     if server.transport not in DISCOVERABLE_TRANSPORTS:
@@ -218,32 +211,33 @@ def discover(server, *, remove_stale=False, client=None):
 
     connection = connection_for(server)
     caller = client if client is not None else _default_client()
+    policy = policy if policy is not None else DiscoveryPolicy.from_settings()
 
     try:
         info, advertised = caller.describe(connection)
     except Exception as error:  # pylint: disable=broad-except
-        # Whatever the client raised, the caller sees one family.
         raise MCPCallError(f"Could not read the tools on '{server}': {_cause(error)}") from error
 
-    report = _reconcile(server, tuple(advertised), remove_stale=remove_stale)
+    report = _reconcile(server, tuple(advertised), remove_stale=remove_stale, policy=policy)
     _record_server_info(server, info)
     logger.info("Discovered tools on MCP server %s: %s", server, report.summary())
     return report
 
 
 def _cause(error, _depth=0):
-    """The exception types naming what actually went wrong, not the wrapper that carried them.
+    """Name the exception types that went wrong, not the wrapper that carried them.
 
-    The MCP client runs on anyio task groups, so a DNS failure or a refused connection reaches this
-    module as `unhandled errors in a TaskGroup (1 sub-exception)`. That sentence tells an operator
-    nothing, and it is the sentence they get in the Job log. This digs out the real exceptions.
+    The MCP client runs on anyio task groups, so a DNS failure reaches this module as
+    ``unhandled errors in a TaskGroup``. Only the type name is returned: an HTTP client's message
+    embeds the request URL, which an operator may have written a credential into, and it would
+    land in a JobLogEntry.
 
-    Only the type name is returned. An HTTP client's own message embeds the request URL, and a
-    remote URL is free text that an operator may well have written a credential into, as
-    `https://user:password@host/mcp` or as a token query parameter. That message ends up in a
-    JobLogEntry, which every holder of `extras.view_jobresult` can read - a wider audience than
-    the one that may read the Secrets Group the credential came from. The status code and the type
-    are what an operator needs; the URL they already know.
+    Args:
+        error: The exception to unwrap.
+        _depth: Recursion guard.
+
+    Returns:
+        str: The type names, joined by ``; ``.
     """
     inner = getattr(error, "exceptions", None)
     if not inner or _depth >= 5:
@@ -254,9 +248,14 @@ def _cause(error, _depth=0):
 def _record_server_info(server, info):
     """Write what the server said about itself, and stamp the run.
 
-    The stamp goes on last and only on a run that got this far, so an operator reading
-    ``last_discovered_at`` sees when the registry was actually refreshed rather than when somebody
-    last tried.
+    The stamp goes on last, so ``last_discovered_at`` records a refresh rather than an attempt.
+
+    Args:
+        server: The MCPServer to write to.
+        info: What the handshake returned.
+
+    Raises:
+        MCPCallError: The server reported metadata the registry cannot hold.
     """
     server.protocol_version = info.protocol_version or ""
     server.server_name = info.name or ""
@@ -265,29 +264,33 @@ def _record_server_info(server, info):
     server.capabilities = info.capabilities or {}
     server.last_discovered_at = timezone.now()
 
-    # Every value above is self-reported by an unverified party and lands in a bounded column. A
-    # server reporting a 300-character name must fail this one server, not raise out of the job
-    # and skip every server after it.
     try:
         server.validated_save()
     except (ValidationError, IntegrityError) as error:
         raise MCPCallError(f"'{server}' reported metadata this registry cannot hold: {error}") from error
 
 
-def _reconcile(server, advertised, *, remove_stale=False):
-    """Write what was advertised onto the registry, and say what changed.
+def _reconcile(server, advertised, *, remove_stale, policy):
+    """Write what was advertised onto the registry, in one transaction.
 
-    One transaction: a server that advertises the same tool twice, or a name longer than the
-    column, must not leave half a registry behind and half a discovery reported. Model validation
-    catches both, and it raises `ValidationError`, which is outside the family every caller of this
-    module handles - so it is translated here rather than escaping as a 500.
+    Args:
+        server: The MCPServer being discovered.
+        advertised: The tools the server offered.
+        remove_stale: Delete tools no longer advertised instead of disabling them.
+        policy: What this pass may do to ``enabled``.
+
+    Returns:
+        DiscoveryReport: What the pass changed.
+
+    Raises:
+        MCPCallError: The server advertised a tool the registry cannot hold.
     """
     now = timezone.now()
 
     try:
         with transaction.atomic():
             existing = {tool.name: tool for tool in server.tools.all()}
-            added, updated, definition_changed, disabled_by_change = _upsert(server, advertised, existing, now)
+            added, updated, definition_changed, disabled_by_change = _upsert(server, advertised, existing, now, policy)
 
             advertised_names = {definition.name for definition in advertised}
             stale = tuple(tool for name, tool in sorted(existing.items()) if name not in advertised_names)
@@ -305,30 +308,37 @@ def _reconcile(server, advertised, *, remove_stale=False):
     )
 
 
-def _upsert(server, advertised, existing, now):
+def _upsert(server, advertised, existing, now, policy):
     """Create or refresh a row for each advertised tool.
 
-    Returns (added, updated, definition_changed, disabled_by_change). The last is the subset of
-    definition_changed this run switched off, which is a separate fact from the definition moving.
+    ``existing`` is mutated as it goes, so a server advertising one name twice updates its own
+    first row instead of colliding on the unique constraint.
 
-    `existing` is mutated as it goes, so a server advertising one name twice updates its own first
-    row rather than colliding with it on the unique constraint. The caller reads it afterwards to
-    work out what went missing.
+    Args:
+        server: The MCPServer being discovered.
+        advertised: The tools the server offered.
+        existing: Tools already in the registry, keyed by name. Mutated.
+        now: The timestamp for this pass.
+        policy: What this pass may do to ``enabled``.
+
+    Returns:
+        tuple: added, updated, definition_changed, disabled_by_change.
     """
     added, updated, definition_changed, disabled_by_change = [], [], [], []
-    disable_on_change = bool(app_setting(DISABLE_ON_DEFINITION_CHANGE))
 
     for definition in advertised:
         fingerprint = definition_fingerprint(definition)
         tool = existing.get(definition.name)
 
         if tool is None:
-            tool = _create(server, definition, fingerprint, now)
+            tool = _create(server, definition, fingerprint, now, enabled=policy.new_tools_enabled)
             existing[tool.name] = tool
             added.append(tool)
             continue
 
-        changed, disabled = _update(tool, definition, fingerprint, now, disable_on_change=disable_on_change)
+        changed, disabled = _update(
+            tool, definition, fingerprint, now, disable_on_change=policy.disable_on_definition_change
+        )
         (definition_changed if changed else updated).append(tool)
         if disabled:
             disabled_by_change.append(tool)
@@ -336,19 +346,22 @@ def _upsert(server, advertised, existing, now):
     return tuple(added), tuple(updated), tuple(definition_changed), tuple(disabled_by_change)
 
 
-def _create(server, definition, fingerprint, now):
-    """Write a newly advertised tool, believing the server about everything except what it may do.
+def _create(server, definition, fingerprint, now, *, enabled):
+    """Write a newly advertised tool.
 
-    ``writable`` is left at its model default of True: the tool is assumed to change something
-    until a person says otherwise. The server's ``readOnlyHint`` is recorded beside it and decides
-    nothing - it is written by the party a reviewer is checking, and a registry that let it through
-    would let a hostile server file ``push_config`` under "safe".
+    ``writable`` stays at its model default of True: the tool is assumed to change something until
+    a person says otherwise. The server's ``readOnlyHint`` is recorded beside it and decides
+    nothing. ``enabled`` answers a different question, so the caller decides it.
 
-    ``enabled`` answers a different question, so it comes from the ``new_tools_enabled`` setting.
-    ``writable`` says a tool needs review before each call; ``enabled`` says the tool is on offer at
-    all. A tool nobody has read is not merely one that changes something: it is one whose
-    description nobody has checked, and in an agent's prompt that description is the tool's
-    semantics. The setting defaults to True, so a deployment that has not chosen sees no change.
+    Args:
+        server: The MCPServer that advertised the tool.
+        definition: What the server said about it.
+        fingerprint: The digest of that definition.
+        now: The timestamp for this pass.
+        enabled: Whether the tool arrives on offer.
+
+    Returns:
+        MCPTool: The saved row.
     """
     tool = MCPTool(
         mcp_server=server,
@@ -357,7 +370,7 @@ def _create(server, definition, fingerprint, now):
         description=definition.description or "",
         input_schema=definition.input_schema or {},
         output_schema=definition.output_schema or {},
-        enabled=bool(app_setting(NEW_TOOLS_ENABLED)),
+        enabled=enabled,
         advertised_read_only=definition.read_only_hint,
         definition_fingerprint=fingerprint,
         last_seen_at=now,
@@ -366,26 +379,27 @@ def _create(server, definition, fingerprint, now):
     return tool
 
 
-def _update(tool, definition, fingerprint, now, *, disable_on_change=False):
+def _update(tool, definition, fingerprint, now, *, disable_on_change):
     """Refresh what the server says about an existing tool.
 
-    Returns (definition_moved, was_disabled).
+    ``writable`` is never written here. ``enabled`` is written only when ``disable_on_change`` is
+    set and the fingerprint moved under a tool that was on. The row keeps its schemas, its
+    description, and its review history.
 
-    ``writable`` is the operator's column and is never written here. ``enabled`` is too, with one
-    opt-in exception: when ``disable_on_definition_change`` is set and the fingerprint moves under a
-    tool that was on, this clears it. The fingerprint exists precisely because a compromised or
-    careless server can rewrite a tool's description while leaving its arguments alone, and merely
-    reporting that leaves the tool on offer until somebody reads the log. The row keeps its
-    schema, its description and its review history, so one click puts it back.
+    Args:
+        tool: The row to refresh.
+        definition: What the server said about it.
+        fingerprint: The digest of that definition.
+        now: The timestamp for this pass.
+        disable_on_change: Clear ``enabled`` when the fingerprint moved.
 
-    The setting defaults to off, which is today's behaviour: report the change and hold no policy.
+    Returns:
+        tuple[bool, bool]: Whether the definition moved, and whether this call switched the tool
+            off.
     """
     changed = tool.definition_fingerprint != fingerprint
 
     if not changed and tool.last_seen_at is not None:
-        # Nothing to write but the timestamp, and this is a change-logged model: a nightly run
-        # against a forty-tool server would otherwise file forty ObjectChange rows a night
-        # recording that nothing happened. The stamp is worth less than the change log is.
         return False, False
 
     disabled = changed and disable_on_change and tool.enabled
@@ -404,14 +418,17 @@ def _update(tool, definition, fingerprint, now, *, disable_on_change=False):
 
 
 def _retire(stale, *, remove_stale):
-    """Deal with tools the server no longer advertises. Returns (disabled, deleted).
+    """Deal with tools the server no longer advertises.
 
-    Disabling is the default because it loses nothing: the row keeps its description, its schema
-    and whatever a reviewer decided, ``last_seen_at`` still says when the server last offered it,
-    and a tool that comes back is one click from being in service again. Deleting is available for
-    an operator who wants the table to mirror the server exactly, and has to be asked for.
+    Disabling is the default, because it keeps the description, the schema, and the review.
+    ``last_seen_at`` is not touched: it is the evidence of when the tool went away.
 
-    ``last_seen_at`` is deliberately not touched. It is the evidence of when the tool went away.
+    Args:
+        stale: The tools no longer advertised.
+        remove_stale: Delete them instead of disabling them.
+
+    Returns:
+        tuple: The tools disabled by this run, and the labels of those deleted.
     """
     disabled, deleted = [], []
     for tool in stale:
@@ -419,9 +436,6 @@ def _retire(stale, *, remove_stale):
             deleted.append(str(tool))
             tool.delete()
             continue
-        # Only a tool this run turned off. A tool disabled by an earlier run is already known,
-        # and re-reporting it nightly forever trains an operator to ignore the one warning that
-        # is meant to say something changed.
         if tool.enabled:
             tool.enabled = False
             tool.validated_save()
@@ -430,16 +444,17 @@ def _retire(stale, *, remove_stale):
 
 
 def definition_fingerprint(definition):
-    """A stable digest of everything a server said about one tool, so "did this change" is one test.
+    """Digest everything a server said about one tool.
 
-    The description is in it as well as the schemas. It is half of what a reviewer read when they
-    decided whether the tool writes - a schema rarely says that on its own - and in an agent's
-    prompt it *is* the tool's semantics, which makes it the sentence a compromised server would
-    rewrite while leaving the arguments alone.
+    The description is included as well as the schemas: it is half of what a reviewer read, and it
+    is the sentence a compromised server would rewrite while leaving the arguments alone. Keys are
+    sorted, so a serialisation order does not move the digest.
 
-    Sorted keys, because two servers - or two versions of one - may serialize the same schema in
-    different orders, and a fingerprint that moves on a key ordering is an alarm an operator stops
-    reading.
+    Args:
+        definition: What the server advertised.
+
+    Returns:
+        str: A hex SHA-256 digest.
     """
     canonical = json.dumps(
         {
@@ -455,10 +470,21 @@ def definition_fingerprint(definition):
 
 
 def _rendered(integration, method_name, server):
-    """One of the integration's Jinja2-templated fields, rendered rather than read raw.
+    """Render one of the integration's Jinja2 fields.
 
-    All three of remote URL, headers and extra config support Jinja2, so reading the raw column
-    would hand a template string to httpx.
+    All of remote URL, headers, and extra config support Jinja2, so the raw column would hand a
+    template string to httpx.
+
+    Args:
+        integration: The ExternalIntegration to read.
+        method_name: The render method to call.
+        server: The object the template renders against.
+
+    Returns:
+        The rendered value.
+
+    Raises:
+        MCPConfigurationError: The template could not be rendered.
     """
     try:
         return getattr(integration, method_name)({"obj": server})
@@ -469,11 +495,18 @@ def _rendered(integration, method_name, server):
 
 
 def _attr(obj, *names, default=None):
-    """The first of ``names`` this object actually has.
+    """Return the first of ``names`` the object has.
 
-    The MCP schema names its fields in camel case and the Python SDK exposes them in snake case,
-    and which of the two an attribute answers to has moved between SDK releases. Asking for both is
-    cheaper than pinning the SDK to a patch version.
+    The MCP schema names its fields in camel case and the Python SDK in snake case, and which one
+    answers has moved between SDK releases.
+
+    Args:
+        obj: The object to read.
+        *names: Attribute names to try, in order.
+        default: Returned when none of them is set.
+
+    Returns:
+        The first value found, or ``default``.
     """
     for name in names:
         value = getattr(obj, name, None)
@@ -499,16 +532,19 @@ def _as_dict(value):
 
 
 def _redirect_safe_client_class(base_class, protected_headers):
-    """An HTTP client that drops the integration's headers on a cross-origin redirect.
+    """Build an HTTP client that drops the integration's headers on a cross-origin redirect.
 
-    The session has to follow a redirect, because an endpoint sending `/mcp` to `/mcp/` is
-    ordinary and the SDK's own client factory allows it. But the headers on this client are the
-    integration's, and `connection_for` puts whatever header an operator chose to authenticate
-    with among them. An HTTP client strips only `Authorization` when the origin changes, so a
-    server answering `302 Location: https://elsewhere/` would be handed an `X-Api-Key` verbatim.
+    The session must follow a redirect, because ``/mcp`` to ``/mcp/`` is ordinary. An HTTP client
+    strips only ``Authorization`` when the origin changes, so a server answering
+    ``302 Location: https://elsewhere/`` would be handed an ``X-Api-Key`` verbatim.
 
-    Returns None when the client library does not expose the hook this relies on. The caller then
-    refuses to follow redirects at all, which fails loudly rather than quietly leaking.
+    Args:
+        base_class: The client class to subclass.
+        protected_headers: The header names to drop off-origin.
+
+    Returns:
+        type | None: The subclass, or None when the library exposes no redirect hook. The caller
+            then refuses redirects, which fails loudly rather than leaking quietly.
     """
     if not hasattr(base_class, "_redirect_headers"):
         return None
@@ -535,14 +571,11 @@ def _redirect_safe_client_class(base_class, protected_headers):
 
 
 class _StreamableHTTPClient:  # pylint: disable=too-few-public-methods
-    """The real client: one MCP session per discovery pass, over HTTP and nothing else.
+    """One MCP session per discovery pass, over HTTP and nothing else.
 
-    A session per pass rather than a pooled one. Discovery runs from a Job that does not outlive
-    its own run, and a cached session would have to be invalidated on every registry edit.
-
-    The SDK is asynchronous and every caller here is not, so each pass is one ``asyncio.run``. That
-    is correct in a Celery worker and in a WSGI request, and it is wrong inside a running event
-    loop - which this app has none of, and which the error below explains if that changes.
+    A session per pass rather than a pooled one: discovery runs from a Job that does not outlive
+    its run. The SDK is asynchronous and every caller here is not, so each pass is one
+    ``asyncio.run``, which is correct in a Celery worker and in a WSGI request.
     """
 
     def __init__(self, session_class, transport, http_client_class, timeout_class):
@@ -553,12 +586,13 @@ class _StreamableHTTPClient:  # pylint: disable=too-few-public-methods
         self._timeout_class = timeout_class
 
     def describe(self, connection):
-        """What the server says it is, and every tool it advertises. One session for both.
+        """Read what the server is and every tool it advertises, in one session.
 
-        ``tools/list`` is paginated: a server may answer with a page and a cursor. Reading one page
-        would leave the rest unregistered, and would also report every tool from page two onwards
-        as "no longer offered" on each run - which is the one signal an operator is meant to act
-        on.
+        Args:
+        connection: Where and how to connect.
+
+        Returns:
+        tuple: A ServerInfo and a tuple of ToolDefinition.
         """
         info, pages = self._run(connection, self._describe)
         definitions = []
@@ -571,10 +605,15 @@ class _StreamableHTTPClient:  # pylint: disable=too-few-public-methods
         return _server_info(initialized), await self._pages(session)
 
     async def _pages(self, session):
-        """Every page of the tool list, in order.
+        """Read every page of the tool list, in order.
 
-        Bounded: a server that answered with a cursor pointing at itself would otherwise be an
-        infinite loop inside a worker. The cap is far above any real tool list.
+        Bounded by ``MAX_TOOL_PAGES``, so a cursor pointing at itself is not an infinite loop.
+
+        Args:
+            session: The open MCP session.
+
+        Returns:
+            list: Every tool the server advertised.
         """
         from mcp import types  # pylint: disable=import-outside-toplevel
 
@@ -592,8 +631,6 @@ class _StreamableHTTPClient:  # pylint: disable=too-few-public-methods
 
     def _run(self, connection, operation):
         """Open a session, do one thing, close it."""
-        # Redirects are allowed only while the integration's headers can be stripped when the
-        # origin changes. See `_redirect_safe_client_class`.
         client_class = _redirect_safe_client_class(self._http_client_class, connection.headers)
         follow_redirects = client_class is not None
         if client_class is None:
@@ -607,18 +644,12 @@ class _StreamableHTTPClient:  # pylint: disable=too-few-public-methods
             async with client_class(
                 headers=connection.headers,
                 verify=connection.verify,
-                # Not a flat timeout. The SDK's own client factory documents why: the read side of
-                # a streamable HTTP session is a long-lived server-sent-event stream, and a
-                # 30-second read deadline cuts it mid-answer. The other three phases keep the
-                # integration's number, which is what an operator set it for.
                 timeout=self._timeout_class(
                     connect=connection.timeout,
                     write=connection.timeout,
                     pool=connection.timeout,
                     read=max(connection.timeout, SSE_READ_TIMEOUT_SECONDS),
                 ),
-                # An endpoint that redirects `/mcp` to `/mcp/` is ordinary, and without this the
-                # session simply fails. The SDK's factory sets it for the same reason.
                 follow_redirects=follow_redirects,
             ) as http_client:
                 async with self._transport(connection.url, http_client=http_client) as (read, write):
@@ -637,10 +668,15 @@ class _StreamableHTTPClient:  # pylint: disable=too-few-public-methods
 
 
 def _server_info(initialized):
-    """A `ServerInfo` from whatever the SDK's handshake returned.
+    """Build a ServerInfo from the SDK's handshake result.
 
-    Everything is optional. A server that reports nothing about itself is still a server whose
-    tools are worth reading, so a missing field is an empty string rather than a failure.
+    Every field is optional. A missing one becomes an empty string.
+
+    Args:
+        initialized: The SDK's initialize result.
+
+    Returns:
+        ServerInfo: What the server reported.
     """
     reported = _attr(initialized, "server_info", "serverInfo")
     return ServerInfo(
@@ -672,8 +708,6 @@ def _default_client():
         from mcp import ClientSession  # pylint: disable=import-outside-toplevel
         from mcp.client.streamable_http import streamable_http_client  # pylint: disable=import-outside-toplevel
     except ImportError as error:
-        # The cause is in the message on purpose: a dependency that is installed and unimportable
-        # is not a missing extra, and telling somebody to install it again sends them the wrong way.
         raise ImproperlyConfigured(
             "The MCP client could not be imported, so no server can be discovered: "
             f"{type(error).__name__}: {error}. "

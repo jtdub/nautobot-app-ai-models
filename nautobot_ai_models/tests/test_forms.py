@@ -205,11 +205,8 @@ class MCPServerFormTest(FormTestCases.BaseFormTestCase):
     def test_external_integration_offers_embedded_create(self):
         """The "+" button that creates an ExternalIntegration in a modal must stay on.
 
-        Nautobot turns this on for every DynamicModelChoiceField on a NautobotModelForm, so this
-        test guards against somebody turning it off - by adding the field to a
-        `Meta.exclude_embedded_create` list, or by passing `embedded_create=False` - rather than
-        against Nautobot changing. Without it a user has to leave a half-filled form to go and
-        create the integration.
+        Guards against ``Meta.exclude_embedded_create`` or ``embedded_create=False`` turning it
+        off. Without it a user leaves a half-filled form to create the integration.
         """
         form = forms.MCPServerForm()
         self.assertTrue(form.fields["external_integration"].embedded_create)
@@ -229,8 +226,6 @@ class MCPToolFormTest(FormTestCases.BaseFormTestCase):
         form = forms.MCPToolForm(data={"mcp_server": self.server.pk, "name": "get_device"})
         self.assertTrue(form.is_valid(), form.errors)
         tool = form.save()
-        # Both checkboxes were absent from the POST, which is what an unticked box looks like.
-        # The model default does not apply here; the submitted value does.
         self.assertFalse(tool.enabled)
         self.assertFalse(tool.writable)
 
@@ -269,9 +264,7 @@ class MCPServerBulkEditFormTest(FormTestCases.BaseFormTestCase):
 
     def test_transport_offers_a_blank_choice(self):
         """Leaving transport alone has to be expressible."""
-        # A bulk edit form takes the model it edits as its first argument.
         choices = forms.MCPServerBulkEditForm(models.MCPServer).fields["transport"].choices
-        # Nautobot's bulk-update mixin treats None and the empty string alike as "leave it".
         blanks = [value for value, _ in choices if value in (None, "")]
         self.assertTrue(blanks, f"transport offers no blank choice: {list(choices)}")
 

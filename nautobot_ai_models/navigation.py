@@ -51,8 +51,6 @@ mcp_model_items = (
         link="plugins:nautobot_ai_models:mcptool_list",
         name="MCP Tools",
         permissions=["nautobot_ai_models.view_mcptool"],
-        # Addable by hand as well as by discovery: a stdio server cannot be discovered from a
-        # Nautobot worker, so its tools have to be entered.
         buttons=(
             NavMenuAddButton(
                 link="plugins:nautobot_ai_models:mcptool_add",
@@ -62,9 +60,6 @@ mcp_model_items = (
     ),
 )
 
-# "AI Tools" is a shared top-level tab. Another AI app, such as an MCP models app, joins it by
-# declaring a NavMenuTab with the identical name, weight, and icon, plus its own NavMenuGroup.
-# See docs/dev/extending.md.
 menu_items = (
     NavMenuTab(
         name=AI_TOOLS_TAB_NAME,

@@ -9,11 +9,6 @@ from nautobot_ai_models.models import AIModel, AIProvider, MCPServer, MCPTool
 
 INTEGRATION_NAME = "AI Models Demo Integration"
 
-#: Name, dialect, OpenAI-compatible, and the models to hang off it. Each model carries its kind,
-#: so the demo data shows a chat model and an embedding model side by side.
-#:
-#: "Demo Ollama" is the case worth demonstrating: it is OpenAI-compatible and still has its own
-#: dialect, because its compatibility layer does not return tool calls.
 PROVIDERS = (
     (
         "Demo OpenAI",

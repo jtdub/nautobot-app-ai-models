@@ -1,24 +1,21 @@
-"""Models for AI Models.
+"""Registry models for LLM providers, LLM models, MCP servers, and MCP tools.
 
-Two registries live here, and neither one calls anything.
-
-* AIProvider and AIModel record which LLM endpoints exist and which models each one offers.
-* MCPServer and MCPTool record which MCP servers exist and what each one advertises.
-
-Every one of them keeps its endpoint, headers, TLS settings, and credentials in a Nautobot
-ExternalIntegration rather than in a field of its own.
+Every model keeps its endpoint, headers, TLS settings, and credentials in a Nautobot
+ExternalIntegration. None of them calls anything.
 """
 
-# Django imports
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-
-# Nautobot imports
 from nautobot.apps.constants import CHARFIELD_MAX_LENGTH
 from nautobot.apps.models import OrganizationalModel, PrimaryModel, extras_features
 
-from nautobot_ai_models.choices import AIModelKindChoices, AIProviderTypeChoices, MCPTransportChoices
+from nautobot_ai_models.choices import (
+    ADDRESSED_PROVIDER_TYPES,
+    AIModelKindChoices,
+    AIProviderTypeChoices,
+    MCPTransportChoices,
+)
 from nautobot_ai_models.constants import (
     ALLOWED_MODEL_PARAMETERS,
     COST_DECIMAL_PLACES,
@@ -32,16 +29,28 @@ from nautobot_ai_models.constants import (
 )
 
 
+def validate_remote_url(instance, message):
+    """Check that the instance's External Integration carries a remote URL.
+
+    Args:
+        instance: A model with an ``external_integration`` foreign key.
+        message: The error to raise against that field.
+
+    Raises:
+        ValidationError: The integration is set and carries no remote URL.
+    """
+    if instance.external_integration_id is not None and not instance.external_integration.remote_url:
+        raise ValidationError({"external_integration": message})
+
+
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
 class AIProvider(OrganizationalModel):  # pylint: disable=too-many-ancestors
     """A remote LLM provider endpoint.
 
-    A AIProvider records that an endpoint exists and how to reach it. It never stores a URL, a header,
-    a TLS setting, or a credential of its own. The related Nautobot ExternalIntegration owns all of
-    those. This app performs no inference; it only catalogs what is available.
+    Records that an endpoint exists and how to reach it. The related ExternalIntegration owns the
+    URL, the headers, the TLS settings, and the credentials.
     """
 
-    # This app catalogs providers. It does not group them, so opt out of Dynamic Groups.
     is_dynamic_group_associable_model = False
 
     name = models.CharField(max_length=CHARFIELD_MAX_LENGTH, unique=True)
@@ -62,10 +71,6 @@ class AIProvider(OrganizationalModel):  # pylint: disable=too-many-ancestors
         max_length=CHARFIELD_MAX_LENGTH,
         choices=AIProviderTypeChoices,
         default=AIProviderTypeChoices.OPENAI,
-        # Blank exists for one reason: the migration that added this field cannot say what a
-        # provider that was not OpenAI-compatible actually speaks, so it leaves those rows empty
-        # rather than guessing. `clean()` refuses a blank, so no new row can carry one.
-        blank=True,
         db_index=True,
         verbose_name="Provider type",
         help_text=(
@@ -103,9 +108,6 @@ class AIProvider(OrganizationalModel):  # pylint: disable=too-many-ancestors
 
         ordering = ["name"]
 
-        # Named AIProvider rather than Provider, because Nautobot core already defines
-        # circuits.Provider, and one unqualified name for two things confuses both a reader
-        # and an import.
         verbose_name = "AI Provider"
         verbose_name_plural = "AI Providers"
 
@@ -114,55 +116,31 @@ class AIProvider(OrganizationalModel):  # pylint: disable=too-many-ancestors
         return self.name
 
     def clean(self):
-        """Refuse a provider nothing can address.
+        """Check that an address-type provider has a remote URL.
 
-        Two checks, both about a consuming app being able to reach the right endpoint.
-
-        A blank ``provider_type`` reaches here only on a row the migration could not answer for.
-        Refusing it makes an operator answer the next time the row is saved, rather than leaving a
-        consuming app to guess a dialect.
-
-        A provider whose type is an address rather than a service needs a remote URL. A client with
-        no URL for one of those falls back to a default endpoint, which is somebody else's API.
-        ``MCPServer.clean()`` does the same thing for the same reason.
+        Raises:
+            ValidationError: The provider type is in ``ADDRESSED_PROVIDER_TYPES`` and its
+                integration carries no remote URL, so a client would fall back to another
+                company's endpoint.
         """
         super().clean()
 
-        if not self.provider_type:
-            raise ValidationError(
-                {"provider_type": "Say which API dialect this endpoint speaks. Nothing can address it otherwise."}
-            )
-
-        addressed_types = (AIProviderTypeChoices.OPENAI_COMPATIBLE, AIProviderTypeChoices.OLLAMA)
-        if (
-            self.provider_type in addressed_types
-            and self.external_integration_id is not None
-            and not self.external_integration.remote_url
-        ):
-            raise ValidationError(
-                {
-                    "external_integration": (
-                        f"A {self.get_provider_type_display()} provider is an address, not a service. It needs an "
-                        "external integration with a remote URL."
-                    )
-                }
+        if self.provider_type in ADDRESSED_PROVIDER_TYPES:
+            validate_remote_url(
+                self,
+                f"A {self.get_provider_type_display()} provider is an address, not a service. It needs an "
+                "external integration with a remote URL.",
             )
 
 
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
 class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
-    """A single model offered by a AIProvider.
+    """A single model offered by an AIProvider.
 
-    The num_predict and temperature fields are optional overrides. An empty value inherits the
-    default from the parent AIProvider. Read the resolved values through resolved_num_predict and
-    resolved_temperature.
-
-    Everything else a call needs goes in default_parameters, behind an allowlist. Read that through
-    resolved_parameters, which applies the allowlist a second time and folds the resolved
-    temperature in, so one dictionary is all a consuming app has to build a request from.
+    ``num_predict`` and ``temperature`` are optional overrides. An empty value inherits the
+    provider default. Read the effective values through the ``resolved_*`` properties.
     """
 
-    # This app catalogs models. It does not group them, so opt out of Dynamic Groups.
     is_dynamic_group_associable_model = False
 
     provider = models.ForeignKey(
@@ -241,8 +219,6 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
         """Meta class."""
 
         ordering = ["provider", "name"]
-        # Keep the foreign key last. Nautobot derives the natural key from the first uniqueness
-        # constraint, and a trailing related field is the safe order.
         unique_together = [["name", "provider"]]
         verbose_name = "AI Model"
         verbose_name_plural = "AI Models"
@@ -252,11 +228,14 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
         return f"{self.provider.name}: {self.name}"
 
     def clean(self):
-        """Refuse a default parameter this app has not vetted.
+        """Check ``default_parameters`` against the allowlist.
 
-        The allowlist is checked here and again in `resolved_parameters`. Once is not enough: a
-        fixture, a data migration, or a direct ORM write never runs this method, and the read side
-        is where a key that got past it would be handed to a client.
+        Checked again in :attr:`resolved_parameters`, because a fixture, a data migration, or a
+        direct ORM write never runs this method.
+
+        Raises:
+            ValidationError: The value is not a mapping, or a key is not in
+                ``ALLOWED_MODEL_PARAMETERS``.
         """
         super().clean()
 
@@ -276,27 +255,33 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
 
     @property
     def is_available(self):
-        """Whether this registry offers the model at all.
+        """Whether the registry offers this model at all.
 
-        A model on a disabled provider is not on offer however the model itself is flagged. Saves a
-        consuming app asking two questions, and matches `MCPTool.is_available` on the MCP half.
+        Returns:
+            bool: True when the model and its provider are both enabled.
         """
         # pylint: disable=no-member  # pylint-django cannot resolve the ForeignKey target here.
         return self.enabled and self.provider.enabled
 
     @property
     def resolved_num_predict(self):
-        """Return this model's num_predict, or the provider default when unset."""
+        """The model's ``num_predict``, or the provider default when unset.
+
+        Returns:
+            int | None: The effective token limit.
+        """
         # pylint: disable=no-member  # pylint-django cannot resolve the ForeignKey target here.
         return self.num_predict if self.num_predict is not None else self.provider.num_predict
 
     @property
     def resolved_temperature(self):
-        """Return the effective temperature: this model's column, then its parameters, then the provider.
+        """The effective temperature.
 
-        `temperature` is on the parameter allowlist as well as being a column, so an operator can
-        set it in two places. The column wins, because it is the field they see on the form.
-        `resolved_parameters` applies the same order, so both properties always agree.
+        Precedence: this model's column, then ``default_parameters["temperature"]``, then the
+        provider default.
+
+        Returns:
+            Decimal | float | None: The effective temperature, in the type its source held.
         """
         # pylint: disable=no-member  # pylint-django cannot resolve the ForeignKey target here.
         if self.temperature is not None:
@@ -308,42 +293,35 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
 
     @property
     def resolved_parameters(self):
-        """Return the request parameters for this model, checked against the allowlist a second time.
+        """The request parameters to send with a call to this model.
 
-        The read-time half of the allowlist. `clean()` catches what a form or the REST API writes;
-        this catches what a fixture, a data migration, or a direct ORM write put in the column,
-        none of which run `clean()`. An unknown key is dropped rather than raised on: a consuming
-        app reading the registry wants the parameters it can trust, not an exception.
+        Applies the allowlist a second time, dropping any key that got past :meth:`clean`, and
+        folds :attr:`resolved_temperature` in as a float so the result is JSON serialisable.
+
+        Returns:
+            dict: Allowlisted parameters, ready to send.
         """
         parameters = {
             key: value for key, value in (self.default_parameters or {}).items() if key in ALLOWED_MODEL_PARAMETERS
         }
 
+        parameters.pop("temperature", None)
         temperature = self.resolved_temperature
         if temperature is not None:
-            parameters["temperature"] = temperature
-        else:
-            parameters.pop("temperature", None)
+            parameters["temperature"] = float(temperature)
 
         return parameters
 
 
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
 class MCPServer(PrimaryModel):  # pylint: disable=too-many-ancestors
-    """An MCP server known to Nautobot, registered by an operator.
+    """An MCP server registered by an operator.
 
-    Carries no credentials and no URL of its own. The ExternalIntegration it points at holds the
-    endpoint, its headers and its TLS settings, and that integration's secrets group holds whatever
-    authenticates to it. That is deliberate: an operator already manages outbound endpoints in one
-    place, and a second place to look would be a second place to leak from.
-
-    The fields below split into two groups. An operator owns name, description, external
-    integration, transport, enabled, and tenant. The discovery job owns everything from
-    ``protocol_version`` down, and rewrites those on every successful run.
+    The ExternalIntegration holds the endpoint, its headers, its TLS settings, and its secrets
+    group. An operator owns the fields above ``protocol_version``; discovery owns the rest and
+    rewrites them on every successful run.
     """
 
-    # This app catalogs servers. It does not group them, so opt out of Dynamic Groups, as the two
-    # AI models do.
     is_dynamic_group_associable_model = False
 
     name = models.CharField(
@@ -434,33 +412,25 @@ class MCPServer(PrimaryModel):  # pylint: disable=too-many-ancestors
         return self.name
 
     def clean(self):
-        """A server with no URL is a server nothing can reach.
+        """Check that the server has a remote URL.
 
-        Checked here rather than left to the first connection: an ExternalIntegration is a shared
-        object, and the one being pointed at may have been made for something that did not need a
-        remote URL.
+        Raises:
+            ValidationError: The integration carries no remote URL, so nothing can reach the
+                server.
         """
         super().clean()
-        if self.external_integration_id is not None and not self.external_integration.remote_url:
-            raise ValidationError(
-                {"external_integration": "An MCP server needs an external integration with a remote URL."}
-            )
+        validate_remote_url(self, "An MCP server needs an external integration with a remote URL.")
 
 
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
 class MCPTool(OrganizationalModel):  # pylint: disable=too-many-ancestors
     """One tool an MCP server advertises.
 
-    Not a PrimaryModel: a tool carries no tags and belongs to no dynamic group. It is still change
-    logged, because a discovery run rewrites these rows and an operator needs to see what moved.
-
-    The two write-related fields exist separately on purpose. ``advertised_read_only`` is what the
-    server claimed. ``writable`` is what a person decided. The MCP specification requires that a
-    client treat a server's own annotations as untrusted, so discovery records the claim and never
-    acts on it.
+    ``advertised_read_only`` is what the server claimed. ``writable`` is what a person decided.
+    The MCP specification requires that a client treat a server's annotations as untrusted, so
+    discovery records the claim and never acts on it.
     """
 
-    # This app catalogs tools. It does not group them, so opt out of Dynamic Groups.
     is_dynamic_group_associable_model = False
 
     mcp_server = models.ForeignKey(
@@ -552,10 +522,9 @@ class MCPTool(OrganizationalModel):  # pylint: disable=too-many-ancestors
 
     @property
     def is_available(self):
-        """Whether this registry offers the tool at all.
+        """Whether the registry offers this tool at all.
 
-        A tool on a disabled server is not on offer however the tool itself is flagged. Read by the
-        UI to explain why a tool somebody enabled is still not being handed out, and useful to a
-        consuming app that would rather ask one question than two.
+        Returns:
+            bool: True when the tool and its server are both enabled.
         """
         return self.enabled and self.mcp_server.enabled

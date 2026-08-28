@@ -1,5 +1,7 @@
 """Test the AIProvider and AIModel models."""
 
+import json
+
 from django.core.exceptions import ValidationError
 from django.db.models import ProtectedError
 from django.db.utils import IntegrityError
@@ -56,18 +58,6 @@ class TestAIProvider(ModelTestCases.BaseModelTestCase):
         models.AIProvider.objects.create(name="Protected AIProvider", external_integration=integration)
         with self.assertRaises(ProtectedError):
             integration.delete()
-
-
-class TestAIProviderDialect(ModelTestCases.BaseModelTestCase):
-    """Test the two fields a consuming app reads before it addresses a provider."""
-
-    model = models.AIProvider
-
-    @classmethod
-    def setUpTestData(cls):
-        """Create test data for the AIProvider model."""
-        super().setUpTestData()
-        fixtures.create_ai_provider()
 
     def test_a_blank_provider_type_is_refused(self):
         """Only the migration writes a blank, and only for a row it could not answer for."""
@@ -206,7 +196,6 @@ class TestAIModel(ModelTestCases.BaseModelTestCase):
     def test_a_parameter_outside_the_allowlist_is_dropped_at_read_time(self):
         """A fixture, a data migration or a direct ORM write never runs clean(). This is the net."""
         ai_model = models.AIModel.objects.get(name="Test One")
-        # Deliberately bypassing validation, which is the case this property exists for.
         models.AIModel.objects.filter(pk=ai_model.pk).update(
             default_parameters={"seed": 7, "base_url": "https://attacker.example.com/v1"}
         )
@@ -221,42 +210,44 @@ class TestAIModel(ModelTestCases.BaseModelTestCase):
         with self.assertRaises(ValidationError):
             ai_model.validated_save()
 
-    def test_the_temperature_column_wins_over_the_parameter(self):
-        """Set in both places, an operator gets the field they see on the form."""
+    def test_temperature_precedence(self):
+        """The column wins, then the parameter, then the provider default.
+
+        Both properties are asserted on every row, because they must never disagree. Compared as
+        numbers: ``resolved_temperature`` returns the winning source's type, and
+        ``resolved_parameters`` always returns a float.
+        """
+        cases = (
+            ("the column beats both", "1.20", {"temperature": 0.40}, 1.20),
+            ("the parameter beats the provider", None, {"temperature": 0.40}, 0.40),
+            ("the provider is the last resort", None, {}, 0.10),
+        )
+
+        for label, column, parameters, expected in cases:
+            with self.subTest(label):
+                provider = models.AIProvider.objects.get(name="Test One")
+                provider.temperature = "0.10"
+                provider.validated_save()
+
+                ai_model = models.AIModel.objects.get(provider=provider, name="Test One")
+                ai_model.temperature = column
+                ai_model.default_parameters = parameters
+                ai_model.validated_save()
+
+                self.assertEqual(float(ai_model.resolved_temperature), expected)
+                self.assertEqual(ai_model.resolved_parameters["temperature"], expected)
+
+    def test_resolved_parameters_can_be_serialised_as_json(self):
+        """This dictionary exists to be sent, and json.dumps refuses a Decimal."""
         provider = models.AIProvider.objects.get(name="Test One")
-        provider.temperature = "0.10"
+        provider.temperature = "0.70"
         provider.validated_save()
 
         ai_model = models.AIModel.objects.get(provider=provider, name="Test One")
-        ai_model.temperature = "1.20"
-        ai_model.default_parameters = {"temperature": 0.40, "seed": 7}
+        ai_model.default_parameters = {"seed": 7}
         ai_model.validated_save()
 
-        self.assertEqual(str(ai_model.resolved_temperature), "1.20")
-        self.assertEqual(str(ai_model.resolved_parameters["temperature"]), "1.20")
-        self.assertEqual(ai_model.resolved_parameters["seed"], 7)
-
-    def test_the_parameter_wins_over_the_provider_default(self):
-        """With no column set, the parameter is more specific than the provider."""
-        provider = models.AIProvider.objects.get(name="Test One")
-        provider.temperature = "0.10"
-        provider.validated_save()
-
-        ai_model = models.AIModel.objects.get(provider=provider, name="Test One")
-        ai_model.default_parameters = {"temperature": 0.40}
-        ai_model.validated_save()
-
-        self.assertEqual(ai_model.resolved_temperature, 0.40)
-        self.assertEqual(ai_model.resolved_parameters["temperature"], 0.40)
-
-    def test_resolved_parameters_falls_back_to_the_provider(self):
-        """With neither the column nor the parameter set, the provider default is used."""
-        provider = models.AIProvider.objects.get(name="Test One")
-        provider.temperature = "0.10"
-        provider.validated_save()
-
-        ai_model = models.AIModel.objects.get(provider=provider, name="Test One")
-        self.assertEqual(str(ai_model.resolved_parameters["temperature"]), "0.10")
+        self.assertEqual(json.loads(json.dumps(ai_model.resolved_parameters)), {"seed": 7, "temperature": 0.7})
 
     def test_resolved_parameters_omits_temperature_when_nobody_set_one(self):
         """An unset temperature is left out rather than sent as None."""
@@ -264,6 +255,7 @@ class TestAIModel(ModelTestCases.BaseModelTestCase):
         ai_model.default_parameters = {"seed": 7}
         ai_model.validated_save()
 
+        self.assertIsNone(ai_model.resolved_temperature)
         self.assertEqual(ai_model.resolved_parameters, {"seed": 7})
 
     def test_a_fraction_of_a_cent_survives(self):
@@ -306,7 +298,6 @@ class TestMCPServer(ModelTestCases.BaseModelTestCase):
         self.assertEqual(server.name, "Development")
         self.assertEqual(server.description, "")
         self.assertEqual(str(server), "Development")
-        # A server is in service the moment it is registered, and nothing has been discovered yet.
         self.assertTrue(server.enabled)
         self.assertEqual(server.protocol_version, "")
         self.assertEqual(server.capabilities, {})

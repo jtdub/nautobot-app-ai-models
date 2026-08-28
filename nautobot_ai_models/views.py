@@ -72,8 +72,6 @@ class AIModelUIViewSet(NautobotUIViewSet):
             ObjectFieldsPanel(
                 weight=100,
                 section=SectionChoices.LEFT_HALF,
-                # Explicit rather than "__all__": `default_parameters` is a JSON object and gets
-                # a panel of its own below, the way `capabilities` does on the MCP server view.
                 fields=list(AI_MODEL_FIELDS),
             ),
             ObjectTextPanel(
@@ -87,7 +85,6 @@ class AIModelUIViewSet(NautobotUIViewSet):
     )
 
 
-#: Where the discovery job lives, for the detail-view button below.
 DISCOVERY_JOB_MODULE = "nautobot_ai_models.jobs"
 DISCOVERY_JOB_CLASS = "MCPServerDiscovery"
 
@@ -95,14 +92,12 @@ DISCOVERY_JOB_CLASS = "MCPServerDiscovery"
 class RunDiscoveryButton(Button):
     """Open the discovery job with this server already selected.
 
-    A subclass rather than a plain `link_name`, because the target is a Job record whose primary key
-    is not known until the job is installed, and because the server is passed as a query parameter
-    rather than a URL argument. Nautobot's job run view reads `request.GET` into the form's initial
-    values, so `?mcp_server=<pk>` is all the prefill needs.
+    A subclass rather than a ``link_name``, because the Job's primary key is unknown until the Job
+    is installed.
     """
 
     def _job(self):
-        """The installed, enabled Job record for discovery, or None."""
+        """Return the installed, enabled discovery Job, or None."""
         return Job.objects.filter(
             module_name=DISCOVERY_JOB_MODULE,
             job_class_name=DISCOVERY_JOB_CLASS,
@@ -111,11 +106,11 @@ class RunDiscoveryButton(Button):
         ).first()
 
     def should_render(self, context):
-        """Hide the button when the job is not installed, rather than offering a broken link."""
+        """Hide the button when the Job is not installed."""
         return super().should_render(context) and self._job() is not None
 
     def get_link(self, context):
-        """The job's run URL, with this server preselected."""
+        """Return the Job's run URL, with this server preselected."""
         job = self._job()
         if job is None:
             return None
@@ -132,8 +127,6 @@ class MCPServerUIViewSet(NautobotUIViewSet):
     filterset_form_class = forms.MCPServerFilterForm
     form_class = forms.MCPServerForm
     lookup_field = "pk"
-    # Annotated so the table's tool count is one query rather than one per row, and select_related
-    # because the table links both foreign keys.
     queryset = models.MCPServer.objects.select_related("external_integration", "tenant").annotate(
         tool_count=count_related(models.MCPTool, "mcp_server")
     )
@@ -148,13 +141,10 @@ class MCPServerUIViewSet(NautobotUIViewSet):
                 label="MCP Server",
                 fields=list(MCP_SERVER_OPERATOR_FIELDS),
             ),
-            # Kept apart from the panel above on purpose: everything here was written by the
-            # discovery job from what the server said about itself, and none of it is verified.
             ObjectFieldsPanel(
                 weight=200,
                 section=SectionChoices.RIGHT_HALF,
                 label="Reported by the server",
-                # Instructions and capabilities are too large for a field row; each has its own panel.
                 fields=list(MCP_SERVER_DISCOVERED_COLUMNS),
             ),
             ObjectTextPanel(
