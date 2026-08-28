@@ -1,1 +1,17 @@
-true
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://raw.githubusercontent.com/jtdub/nautobot-app-ai-models/develop/nautobot_ai_models/app-config-schema.json",
+    "$comment": "TBD: Update $id, replace `develop` with the future release tag",
+    "type": "object",
+    "properties": {
+        "new_tools_enabled": {
+            "type": "boolean",
+            "default": true
+        },
+        "disable_on_definition_change": {
+            "type": "boolean",
+            "default": false
+        }
+    },
+    "additionalProperties": false
+}

@@ -11,6 +11,7 @@ test that only exercised them through `discover()` would not pin either one.
 
 # pylint: disable=protected-access
 
+from django.test import override_settings
 from nautobot.apps.choices import SecretsGroupAccessTypeChoices, SecretsGroupSecretTypeChoices
 from nautobot.apps.testing import TestCase
 from nautobot.extras.models import ExternalIntegration, Secret, SecretsGroup, SecretsGroupAssociation
@@ -53,6 +54,17 @@ class FakeClient:  # pylint: disable=too-few-public-methods
         if self.error is not None:
             raise self.error
         return self.info, self.tools
+
+
+def with_policy(**overrides):
+    """Override this app's PLUGINS_CONFIG entry, leaving the shipped defaults in place elsewhere.
+
+    `override_settings(PLUGINS_CONFIG=...)` replaces the whole dictionary, so the defaults
+    Nautobot merged in at start-up have to be restated here or the reader finds nothing.
+    """
+    settings = {"new_tools_enabled": True, "disable_on_definition_change": False}
+    settings.update(overrides)
+    return override_settings(PLUGINS_CONFIG={"nautobot_ai_models": settings})
 
 
 def tool(name, **kwargs):
@@ -272,6 +284,62 @@ class DiscoverTest(TestCase):
 
         self.assertEqual(len(report.definition_changed), 1)
         self.assertEqual(report.definition_changed[0].name, "get_device")
+
+    def test_a_new_tool_can_arrive_switched_off(self):
+        """Opt-in. Forty tools nobody has read should not be on offer because a server said so."""
+        with with_policy(new_tools_enabled=False):
+            report = self._discover([tool("get_device", read_only_hint=True)])
+
+        self.assertEqual(len(report.added), 1)
+        created = models.MCPTool.objects.get(mcp_server=self.server, name="get_device")
+        self.assertFalse(created.enabled)
+        # `writable` is a separate question and keeps its careful default either way.
+        self.assertTrue(created.writable)
+
+    def test_a_changed_definition_can_switch_a_tool_off(self):
+        """Opt-in. A description that moved is the tool's semantics changing under a review."""
+        self._discover([tool("get_device")])
+
+        with with_policy(disable_on_definition_change=True):
+            report = self._discover([tool("get_device", description="something else entirely")])
+
+        self.assertEqual([each.name for each in report.disabled_by_change], ["get_device"])
+        changed = models.MCPTool.objects.get(name="get_device")
+        self.assertFalse(changed.enabled)
+        # The row keeps everything a review produced, so one click puts it back.
+        self.assertTrue(changed.writable)
+        self.assertEqual(changed.description, "something else entirely")
+        self.assertIsNotNone(changed.last_seen_at)
+
+    def test_a_changed_definition_leaves_the_tool_on_by_default(self):
+        """The default is today's behaviour: report it and hold no policy."""
+        self._discover([tool("get_device")])
+        report = self._discover([tool("get_device", description="something else entirely")])
+
+        self.assertEqual(report.disabled_by_change, ())
+        self.assertTrue(models.MCPTool.objects.get(name="get_device").enabled)
+
+    def test_an_unchanged_definition_is_never_switched_off(self):
+        """The setting acts on a moved fingerprint, not on every pass."""
+        with with_policy(disable_on_definition_change=True):
+            self._discover([tool("get_device")])
+            report = self._discover([tool("get_device")])
+
+        self.assertEqual(report.disabled_by_change, ())
+        self.assertTrue(models.MCPTool.objects.get(name="get_device").enabled)
+
+    def test_an_already_disabled_tool_is_not_reported_as_newly_disabled(self):
+        """Re-reporting a tool that was already off trains an operator to ignore the warning."""
+        self._discover([tool("get_device")])
+        already_off = models.MCPTool.objects.get(name="get_device")
+        already_off.enabled = False
+        already_off.validated_save()
+
+        with with_policy(disable_on_definition_change=True):
+            report = self._discover([tool("get_device", description="something else entirely")])
+
+        self.assertEqual(len(report.definition_changed), 1)
+        self.assertEqual(report.disabled_by_change, ())
 
     def test_stale_tool_is_disabled_and_kept(self):
         """Losing a tool must not lose the review that was done on it."""

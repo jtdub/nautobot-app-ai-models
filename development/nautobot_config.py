@@ -123,9 +123,16 @@ PLUGINS = ["nautobot_ai_models"]
 
 # Apps configuration settings. These settings are used by various Apps that the user may have installed.
 # Each key in the dictionary is the name of an installed App and its value is a dictionary of settings.
-# PLUGINS_CONFIG = {
-#     'nautobot_ai_models': {
-#         'foo': 'bar',
-#         'buzz': 'bazz'
-#     }
-# }
+#
+# Both keys below are the app's shipped defaults, restated so an operator can see what there is to
+# change. Both are registry policy for the MCP half: they decide what a discovery run puts on offer.
+PLUGINS_CONFIG = {
+    "nautobot_ai_models": {
+        # Whether a newly discovered MCP tool arrives switched on. Set it to False and a tool
+        # nobody has read arrives off, and a person turns it on.
+        "new_tools_enabled": True,
+        # Whether discovery clears `enabled` on a tool whose definition moved under a review
+        # somebody already did. Set it to True and the tool comes back off, keeping its schema.
+        "disable_on_definition_change": False,
+    }
+}

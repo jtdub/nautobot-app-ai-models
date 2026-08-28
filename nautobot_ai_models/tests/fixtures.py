@@ -2,7 +2,7 @@
 
 from nautobot.extras.models import ExternalIntegration
 
-from nautobot_ai_models.choices import MCPTransportChoices
+from nautobot_ai_models.choices import AIModelKindChoices, AIProviderTypeChoices, MCPTransportChoices
 from nautobot_ai_models.models import AIModel, AIProvider, MCPServer, MCPTool
 
 # Three distinct integrations. The generic filter tests need at least three unique values per field.
@@ -12,16 +12,20 @@ INTEGRATIONS = (
     ("Test Integration Three", "https://llm3.example.com"),
 )
 
+#: Three providers, three distinct dialects. The generic filter tests need at least three distinct
+#: values per field, and `provider_type` is exercised by them.
 PROVIDERS = (
-    ("Test One", "First provider"),
-    ("Test Two", "Second provider"),
-    ("Test Three", "Third provider"),
+    ("Test One", "First provider", AIProviderTypeChoices.OPENAI),
+    ("Test Two", "Second provider", AIProviderTypeChoices.ANTHROPIC),
+    ("Test Three", "Third provider", AIProviderTypeChoices.OLLAMA),
 )
 
+#: Two kinds across three models, because `AIModelKindChoices` only has two. `kind` therefore gets
+#: a named test rather than a generic filter test.
 AI_MODELS = (
-    ("Test One", "Test One", "First model"),
-    ("Test Two", "Test Two", "Second model"),
-    ("Test Three", "Test Three", "Third model"),
+    ("Test One", "Test One", "First model", AIModelKindChoices.CHAT),
+    ("Test Two", "Test Two", "Second model", AIModelKindChoices.CHAT),
+    ("Test Three", "Test Three", "Third model", AIModelKindChoices.EMBEDDING),
 )
 
 
@@ -40,10 +44,11 @@ def create_external_integration(name=INTEGRATIONS[0][0], remote_url=INTEGRATIONS
 
 def create_ai_provider():
     """Fixture to create the necessary number of AIProvider objects for tests."""
-    for (name, description), (integration_name, remote_url) in zip(PROVIDERS, INTEGRATIONS):
+    for (name, description, provider_type), (integration_name, remote_url) in zip(PROVIDERS, INTEGRATIONS):
         AIProvider.objects.create(
             name=name,
             description=description,
+            provider_type=provider_type,
             external_integration=create_external_integration(integration_name, remote_url),
         )
 
@@ -51,11 +56,12 @@ def create_ai_provider():
 def create_aimodel():
     """Fixture to create the necessary number of AIModel objects for tests."""
     create_ai_provider()
-    for provider_name, name, description in AI_MODELS:
+    for provider_name, name, description, kind in AI_MODELS:
         AIModel.objects.create(
             provider=AIProvider.objects.get(name=provider_name),
             name=name,
             description=description,
+            kind=kind,
         )
 
 

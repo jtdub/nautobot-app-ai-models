@@ -28,8 +28,12 @@ Neither registry calls anything. Both record what exists so that other apps read
 3. Choose an **External Integration**. If the one you need does not exist yet, select the **+**
    button beside the field. A modal opens, you create the External Integration in place, and the new
    record is selected for you. You never leave the provider form.
-4. Leave **OpenAI-compatible** checked if the endpoint serves `GET /v1/models`.
-5. Optionally set a default **num_predict** and **temperature**.
+4. Choose a **Provider type**: the API dialect a consuming app uses to address this endpoint. An
+   `openai_compatible` or `ollama` provider needs an External Integration with a remote URL, because
+   those two are an address rather than a service.
+5. Leave **OpenAI-compatible** checked if the endpoint serves `GET /v1/models`. This is a separate
+   question from the provider type, and Ollama answers yes to both.
+6. Optionally set a default **num_predict** and **temperature**.
 
 ![Add an AI Provider](../images/ai-provider-add-form-light.png#only-light)
 ![Add an AI Provider](../images/ai-provider-add-form-dark.png#only-dark)
@@ -48,16 +52,24 @@ The job reads `GET <remote_url>/v1/models` from each OpenAI-compatible provider 
 result. It is safe to run repeatedly:
 
 - A model in the response that is not in the database is created.
-- A model already in the database keeps its `enabled`, `num_predict`, and `temperature` values. A
-  user may have set them by hand, so the job never overwrites them.
+- A model already in the database keeps every column an operator owns: `enabled`, `kind`,
+  `num_predict`, `temperature`, both costs, and `default_parameters`. A user may have set any of
+  them by hand, so the job never overwrites them.
 - A model in the database that the provider no longer offers is **logged and kept**. The job never
   deletes a record.
 
-Leave **AI Provider** empty to run against every provider. Uncheck **Enable new models** to create
-new records in the disabled state for review.
+Leave **AI Provider** empty to run against every enabled provider. Uncheck **Enable new models** to
+create new records in the disabled state for review.
 
 A provider that is not OpenAI-compatible is skipped, and the job says so. No standard discovery
 endpoint exists for those.
+
+A disabled provider is skipped too, whether it was named directly or picked up by an all-providers
+run. A provider taken out of service does not come back the next time discovery runs.
+
+Every new model is created with **Kind** set to `chat`. `GET /v1/models` returns chat models and
+embedding models mixed together and says nothing about which is which, so correct the embedding
+models by hand after a first run.
 
 ![The Discover AI Models job result](../images/ai-discovery-job-result-light.png#only-light)
 ![The Discover AI Models job result](../images/ai-discovery-job-result-dark.png#only-dark)
@@ -79,10 +91,31 @@ ai_model.resolved_num_predict
 ai_model.resolved_temperature
 ```
 
+### Send a parameter that has no field of its own
+
+Put it in **Default parameters** on the model, as a JSON object. `seed` for a deterministic run,
+`reasoning_effort` for a reasoning model, `top_k` and `top_p` for a local model, and `extra_body`
+for anything a unified client has no name for.
+
+Only the keys on the app's allowlist are accepted, and nothing that decides which host answers is
+on it. Read the whole set through `ai_model.resolved_parameters`, which applies the allowlist again
+and folds the resolved temperature in. See [AI Model](../models/aimodel.md#default-parameters).
+
 ### Retire a model without deleting it
 
 Clear the **Enabled** checkbox. The record stays, its history stays, and the discovery job leaves
 the flag alone. Consumers should skip a disabled model.
+
+### Take a whole provider out of service
+
+Clear the **Enabled** checkbox on the provider. Discovery skips it, and any app reading this
+registry should skip every model on it.
+
+Do not disable each model instead: the discovery job creates models with **Enabled** set, so a
+provider retired that way quietly comes back on the next run. Do not delete the provider either,
+because that deletes every model record on it along with the cost metadata.
+
+Ask `ai_model.is_available` rather than checking both flags.
 
 ### Record what a model costs
 
@@ -142,6 +175,11 @@ advertised capabilities, its own instructions, and every tool it offers:
 A newly discovered tool arrives enabled and marked `writable=True`. Assume it writes until somebody
 has read what it does.
 
+Set `new_tools_enabled` to `False` in `PLUGINS_CONFIG` to have new tools arrive switched off
+instead, so nothing is on offer before a person has read it. Set `disable_on_definition_change` to
+`True` to have a tool switched off when its definition moves under a review somebody already did.
+See [Install](../admin/install.md#optional-settings).
+
 Go to **AI Tools → MCP Models → MCP Tools**, read each new tool's description and input schema, select
 the ones that only read, and use **Edit Selected** to clear `writable` on all of them at once.
 
@@ -173,14 +211,31 @@ reads them through the ORM or the REST API.
 ```python
 from nautobot_ai_models.models import AIModel
 
-# Every model on offer, with its provider and endpoint ready to read.
+# Every model on offer, with its provider and endpoint ready to read. Both flags, because a model
+# on a disabled provider is not on offer however the model itself is flagged.
 available = AIModel.objects.filter(
     enabled=True,
+    provider__enabled=True,
 ).select_related("provider__external_integration")
+
+# The same question about one record: ai_model.is_available.
+
+# How to address each endpoint. Ollama is the case to notice: its OpenAI-compatibility layer does
+# not return tool calls, so a client that read openai_compatible alone would lose tool calling.
+for ai_model in available:
+    print(ai_model.name, ai_model.provider.provider_type)
+
+# The chat models and the embedding models, which are not interchangeable.
+chat = available.filter(kind="chat")
+embedding = available.filter(kind="embedding")
 
 # The effective inference parameters, with the provider default filled in.
 for ai_model in available:
     print(ai_model.name, ai_model.resolved_num_predict, ai_model.resolved_temperature)
+
+# Everything else a request needs, checked against the allowlist as it is read.
+for ai_model in available:
+    print(ai_model.name, ai_model.resolved_parameters)
 
 # What a million tokens cost. None means nobody recorded a price, not that it is free.
 priced = available.exclude(input_cost_per_million=None)

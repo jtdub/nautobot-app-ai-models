@@ -1,0 +1,3 @@
+Added `AIProvider.enabled`, mirroring `AIModel.enabled` and `MCPServer.enabled`. An operator can now take a whole provider out of service without disabling each of its models one at a time, and without deleting the provider, which would cascade to every model record and the cost metadata on it.
+Added the `AIModel.is_available` property, and exposed it on the REST API. It returns true only when both the model and its provider are enabled, so a consuming app asks one question instead of two.
+Changed the Discover AI Models job to skip a disabled provider, both when it is named directly and when the job runs against every provider. A provider taken out of service no longer comes back the next time discovery runs.

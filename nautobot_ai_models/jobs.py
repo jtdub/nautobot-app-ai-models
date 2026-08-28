@@ -35,7 +35,7 @@ class DiscoverAIModels(Job):
         model=AIProvider,
         required=False,
         label="AI Provider",
-        description="Limit discovery to one provider. Leave empty to run against every provider.",
+        description="Limit discovery to one provider. Leave empty to run against every enabled provider.",
     )
     enable_new_models = BooleanVar(
         default=True,
@@ -44,9 +44,12 @@ class DiscoverAIModels(Job):
 
     def run(self, *, provider, enable_new_models):  # pylint: disable=arguments-differ
         """Discover models for one provider or for all of them."""
-        providers = [provider] if provider is not None else list(AIProvider.objects.all())
+        # Only enabled providers on the all-providers path, the way MCPServerDiscovery._targets
+        # lists only enabled servers. A provider named directly is still reported on, so an
+        # operator who picked one is told why nothing happened.
+        providers = [provider] if provider is not None else list(AIProvider.objects.filter(enabled=True))
         if not providers:
-            self.logger.warning("No AI Providers are defined. Nothing to discover.")
+            self.logger.warning("No enabled AI Provider to discover.")
             return
 
         for each_provider in providers:
@@ -54,6 +57,16 @@ class DiscoverAIModels(Job):
 
     def discover_provider(self, provider, enable_new_models):
         """Sync the AIModel records for a single provider. Never delete a record."""
+        if not provider.enabled:
+            # Reading a disabled provider is harmless, and refusing it is still right: an operator
+            # who took a provider out of service should not find its registry changing underneath
+            # them. services/mcp.py:discover() refuses a disabled MCP server for the same reason.
+            self.logger.warning(
+                "Skipped. This provider is disabled.",
+                extra={"object": provider},
+            )
+            return
+
         if not provider.openai_compatible:
             self.logger.warning(
                 "Skipped. No standard model-discovery endpoint exists for a provider that is not OpenAI-compatible.",
@@ -121,7 +134,9 @@ class DiscoverAIModels(Job):
                 self.logger.info("Created AI Model.", extra={"object": ai_model})
                 continue
 
-            # Never overwrite enabled, num_predict, or temperature. A user may have set them by hand.
+            # Never overwrite an operator's columns: enabled, kind, num_predict, temperature,
+            # either cost, or default_parameters. A user may have set any of them by hand, and
+            # GET /v1/models carries nothing this job could correct them from.
             if entry["description"] and not ai_model.description:
                 ai_model.description = entry["description"]
                 ai_model.validated_save()
@@ -232,7 +247,15 @@ class MCPServerDiscovery(Job):
             self.logger.info(
                 "New tool %s. Review whether it writes, then enable it.", tool.name, extra={"object": tool}
             )
+        disabled_by_change = set(report.disabled_by_change)
         for tool in report.definition_changed:
+            if tool in disabled_by_change:
+                self.logger.warning(
+                    "Tool %s changed its definition and has been disabled. Review it, then enable it again.",
+                    tool.name,
+                    extra={"object": tool},
+                )
+                continue
             self.logger.warning(
                 "Tool %s changed its definition since it was last read. Review it again.",
                 tool.name,

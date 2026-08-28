@@ -3,7 +3,7 @@
 from nautobot.apps.testing import FormTestCases
 
 from nautobot_ai_models import forms, models
-from nautobot_ai_models.choices import MCPTransportChoices
+from nautobot_ai_models.choices import AIModelKindChoices, AIProviderTypeChoices, MCPTransportChoices
 from nautobot_ai_models.tests import fixtures
 
 
@@ -24,7 +24,9 @@ class AIProviderFormTest(FormTestCases.BaseFormTestCase):
                 "name": "Development",
                 "description": "Development Testing",
                 "external_integration": self.integration.pk,
+                "provider_type": AIProviderTypeChoices.OPENAI,
                 "openai_compatible": True,
+                "enabled": True,
                 "num_predict": 512,
                 "temperature": "0.70",
             }
@@ -38,10 +40,35 @@ class AIProviderFormTest(FormTestCases.BaseFormTestCase):
             data={
                 "name": "Development",
                 "external_integration": self.integration.pk,
+                "provider_type": AIProviderTypeChoices.OPENAI,
             }
         )
         self.assertTrue(form.is_valid(), form.errors)
         self.assertTrue(form.save())
+
+    def test_provider_type_is_required(self):
+        """Nothing can address an endpoint whose dialect nobody has recorded."""
+        form = forms.AIProviderForm(
+            data={
+                "name": "Development",
+                "external_integration": self.integration.pk,
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("This field is required.", form.errors["provider_type"])
+
+    def test_an_openai_compatible_provider_needs_a_remote_url(self):
+        """That type is an address, not a service. Without a URL a client reaches somebody else."""
+        integration = fixtures.create_external_integration(name="No URL", remote_url="")
+        form = forms.AIProviderForm(
+            data={
+                "name": "Self Hosted",
+                "external_integration": integration.pk,
+                "provider_type": AIProviderTypeChoices.OPENAI_COMPATIBLE,
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("external_integration", form.errors)
 
     def test_name_is_required(self):
         """The name field is required."""
@@ -86,9 +113,11 @@ class AIModelFormTest(FormTestCases.BaseFormTestCase):
                 "provider": self.provider.pk,
                 "name": "gpt-4o-mini",
                 "description": "Small model",
+                "kind": AIModelKindChoices.CHAT,
                 "enabled": True,
                 "num_predict": 1024,
                 "temperature": "1.00",
+                "default_parameters": '{"seed": 7, "top_p": 0.9}',
             }
         )
         self.assertTrue(form.is_valid(), form.errors)
@@ -96,7 +125,9 @@ class AIModelFormTest(FormTestCases.BaseFormTestCase):
 
     def test_specifying_only_required_success(self):
         """A form with only the required fields validates and saves."""
-        form = forms.AIModelForm(data={"provider": self.provider.pk, "name": "gpt-4o-mini"})
+        form = forms.AIModelForm(
+            data={"provider": self.provider.pk, "name": "gpt-4o-mini", "kind": AIModelKindChoices.CHAT}
+        )
         self.assertTrue(form.is_valid(), form.errors)
         self.assertTrue(form.save())
 
@@ -105,6 +136,23 @@ class AIModelFormTest(FormTestCases.BaseFormTestCase):
         form = forms.AIModelForm(data={"name": "gpt-4o-mini"})
         self.assertFalse(form.is_valid())
         self.assertIn("This field is required.", form.errors["provider"])
+
+    def test_a_parameter_outside_the_allowlist_is_rejected(self):
+        """A key that decides who answers must not get past the form.
+
+        `base_url` is the case the allowlist exists for. An operator holding only `change_aimodel`
+        could otherwise point a call at a host of their choosing, credential attached.
+        """
+        form = forms.AIModelForm(
+            data={
+                "provider": self.provider.pk,
+                "name": "gpt-4o-mini",
+                "kind": AIModelKindChoices.CHAT,
+                "default_parameters": '{"base_url": "https://attacker.example.com/v1"}',
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("default_parameters", form.errors)
 
 
 class MCPServerFormTest(FormTestCases.BaseFormTestCase):

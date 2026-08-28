@@ -21,7 +21,12 @@ class AIModelsConfig(NautobotAppConfig):
     min_version = "3.1.0"
     max_version = "3.99.99"
     required_settings = []
-    default_settings = {}
+    # Both default to today's behaviour, so an existing deployment sees no change. See
+    # nautobot_ai_models/app_settings.py for what each one does.
+    default_settings = {
+        "new_tools_enabled": True,
+        "disable_on_definition_change": False,
+    }
     docs_view_name = "plugins:nautobot_ai_models:docs"
     searchable_models = ["aiprovider", "aimodel", "mcpserver", "mcptool"]
 

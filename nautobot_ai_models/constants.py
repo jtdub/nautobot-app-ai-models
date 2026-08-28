@@ -16,12 +16,70 @@ COST_MAX_DIGITS = 12
 COST_DECIMAL_PLACES = 4
 MIN_COST = 0
 
+#: Request parameters an operator may put in AIModel.default_parameters.
+#:
+#: An allowlist, not a denylist. The keyword surface of a unified LLM client is wide, aliased, and
+#: moves between releases. `base_url` alone overrides `api_base` in litellm, so a denylist naming
+#: `api_base` never sees it. An operator holding only `change_aimodel` could then redirect a call
+#: to a host of their choosing, and the provider's credential would go with it. An allowlist fails
+#: closed on a key nobody has considered; a denylist fails open.
+#:
+#: Every key here shapes an answer. None of them decides who answers.
+#:
+#: `temperature` is in the list even though it has a column of its own. An operator who sets it in
+#: both places gets the same answer either way: AIModel.resolved_parameters and
+#: AIModel.resolved_temperature read the column first, then this dictionary, then the provider.
+ALLOWED_MODEL_PARAMETERS = (
+    "extra_body",
+    "frequency_penalty",
+    "logit_bias",
+    "n",
+    "presence_penalty",
+    "reasoning_effort",
+    "seed",
+    "stop",
+    "temperature",
+    "timeout",
+    "top_k",
+    "top_p",
+)
+
 # The de facto standard model-discovery endpoint for OpenAI-compatible providers.
 MODELS_ENDPOINT = "/v1/models"
 
 # Applied when an ExternalIntegration carries no usable timeout. It accepts 0, and a request
 # with a timeout of 0 fails at once with an error that says nothing about why.
 DEFAULT_TIMEOUT_SECONDS = 30
+
+# --------------------------------------------------------------------------------------------
+# AI field grouping.
+#
+# One tuple, because three layers list these fields by hand: the AI Model filterset, its table,
+# and its detail panel. `default_parameters` is deliberately absent - it is a JSON object, so it
+# gets a panel of its own on the detail view, a column that is off by default in the table, and no
+# filter at all. That is how `capabilities` and the two MCP tool schemas are already treated.
+# --------------------------------------------------------------------------------------------
+#: Everything about an AI model except its default parameters.
+AI_MODEL_FIELDS = (
+    "name",
+    "provider",
+    "description",
+    "kind",
+    "enabled",
+    "num_predict",
+    "temperature",
+    "input_cost_per_million",
+    "output_cost_per_million",
+)
+
+#: The subset of the above that carries a number. Off by default in the table: a list view is for
+#: finding a model, and a price or a token limit is read on the record itself.
+AI_MODEL_NUMERIC_FIELDS = (
+    "num_predict",
+    "temperature",
+    "input_cost_per_million",
+    "output_cost_per_million",
+)
 
 # --------------------------------------------------------------------------------------------
 # MCP field groupings, shared across the form, table, and detail-view layers.

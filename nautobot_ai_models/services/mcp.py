@@ -8,9 +8,11 @@ onto the registry. The rules it holds to:
 * The endpoint, its headers, its TLS settings and its timeout come from the server's
   ExternalIntegration at connection time, and the credential from that integration's secrets group.
   Nothing key-shaped lives in settings, on a model, or in a log line.
-* Discovery owns the fields a server told us about. It never writes ``enabled`` or ``writable`` on
-  a tool that still exists: those two belong to a person. The one exception is a tool the server
-  stopped advertising, which is disabled so it stops being handed out.
+* Discovery owns the fields a server told us about. ``writable`` belongs to a person and is never
+  written here. ``enabled`` belongs to a person too, with three exceptions, all of which only ever
+  turn a tool off: a tool the server stopped advertising, a newly advertised tool when
+  ``new_tools_enabled`` is off, and a tool whose definition moved when
+  ``disable_on_definition_change`` is on. The last two are opt-in and default to today's behaviour.
 * A server's own annotations are recorded and acted on by nothing. The MCP specification requires
   that a client treat annotations as untrusted, and deciding "this tool is safe" from the claim of
   the server the claim describes is exactly the decision it forbids.
@@ -30,6 +32,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 from nautobot.apps.choices import SecretsGroupSecretTypeChoices
 
+from nautobot_ai_models.app_settings import DISABLE_ON_DEFINITION_CHANGE, NEW_TOOLS_ENABLED, app_setting
 from nautobot_ai_models.choices import MCPTransportChoices
 from nautobot_ai_models.constants import DEFAULT_TIMEOUT_SECONDS
 from nautobot_ai_models.models import MCPTool
@@ -121,6 +124,10 @@ class DiscoveryReport:
     added: tuple = ()
     updated: tuple = ()
     definition_changed: tuple = ()
+    #: The subset of definition_changed this run switched off, under the opt-in policy setting.
+    #: A separate tuple rather than a flag, because an operator reading the log needs to be told
+    #: that a tool stopped being offered, not just that it moved.
+    disabled_by_change: tuple = ()
     missing: tuple = ()
     removed: tuple = ()
 
@@ -133,7 +140,8 @@ class DiscoveryReport:
         """One line for a log or a Job result."""
         return (
             f"{len(self.added)} new, {len(self.updated)} updated, "
-            f"{len(self.definition_changed)} changed definition, "
+            f"{len(self.definition_changed)} changed definition "
+            f"({len(self.disabled_by_change)} disabled), "
             f"{len(self.missing)} no longer offered, {len(self.removed)} deleted"
         )
 
@@ -279,7 +287,7 @@ def _reconcile(server, advertised, *, remove_stale=False):
     try:
         with transaction.atomic():
             existing = {tool.name: tool for tool in server.tools.all()}
-            added, updated, definition_changed = _upsert(server, advertised, existing, now)
+            added, updated, definition_changed, disabled_by_change = _upsert(server, advertised, existing, now)
 
             advertised_names = {definition.name for definition in advertised}
             stale = tuple(tool for name, tool in sorted(existing.items()) if name not in advertised_names)
@@ -291,19 +299,24 @@ def _reconcile(server, advertised, *, remove_stale=False):
         added=added,
         updated=updated,
         definition_changed=definition_changed,
+        disabled_by_change=disabled_by_change,
         missing=missing,
         removed=removed,
     )
 
 
 def _upsert(server, advertised, existing, now):
-    """Create or refresh a row for each advertised tool. Returns (added, updated, changed).
+    """Create or refresh a row for each advertised tool.
+
+    Returns (added, updated, definition_changed, disabled_by_change). The last is the subset of
+    definition_changed this run switched off, which is a separate fact from the definition moving.
 
     `existing` is mutated as it goes, so a server advertising one name twice updates its own first
     row rather than colliding with it on the unique constraint. The caller reads it afterwards to
     work out what went missing.
     """
-    added, updated, definition_changed = [], [], []
+    added, updated, definition_changed, disabled_by_change = [], [], [], []
+    disable_on_change = bool(app_setting(DISABLE_ON_DEFINITION_CHANGE))
 
     for definition in advertised:
         fingerprint = definition_fingerprint(definition)
@@ -315,19 +328,27 @@ def _upsert(server, advertised, existing, now):
             added.append(tool)
             continue
 
-        changed = _update(tool, definition, fingerprint, now)
+        changed, disabled = _update(tool, definition, fingerprint, now, disable_on_change=disable_on_change)
         (definition_changed if changed else updated).append(tool)
+        if disabled:
+            disabled_by_change.append(tool)
 
-    return tuple(added), tuple(updated), tuple(definition_changed)
+    return tuple(added), tuple(updated), tuple(definition_changed), tuple(disabled_by_change)
 
 
 def _create(server, definition, fingerprint, now):
     """Write a newly advertised tool, believing the server about everything except what it may do.
 
-    ``writable`` and ``enabled`` are left at their model defaults - the tool is offered, and it is
-    assumed to change something until a person says otherwise. The server's ``readOnlyHint`` is
-    recorded beside them and decides neither: it is written by the party a reviewer is checking,
-    and a registry that let it through would let a hostile server file ``push_config`` under "safe".
+    ``writable`` is left at its model default of True: the tool is assumed to change something
+    until a person says otherwise. The server's ``readOnlyHint`` is recorded beside it and decides
+    nothing - it is written by the party a reviewer is checking, and a registry that let it through
+    would let a hostile server file ``push_config`` under "safe".
+
+    ``enabled`` answers a different question, so it comes from the ``new_tools_enabled`` setting.
+    ``writable`` says a tool needs review before each call; ``enabled`` says the tool is on offer at
+    all. A tool nobody has read is not merely one that changes something: it is one whose
+    description nobody has checked, and in an agent's prompt that description is the tool's
+    semantics. The setting defaults to True, so a deployment that has not chosen sees no change.
     """
     tool = MCPTool(
         mcp_server=server,
@@ -336,6 +357,7 @@ def _create(server, definition, fingerprint, now):
         description=definition.description or "",
         input_schema=definition.input_schema or {},
         output_schema=definition.output_schema or {},
+        enabled=bool(app_setting(NEW_TOOLS_ENABLED)),
         advertised_read_only=definition.read_only_hint,
         definition_fingerprint=fingerprint,
         last_seen_at=now,
@@ -344,12 +366,19 @@ def _create(server, definition, fingerprint, now):
     return tool
 
 
-def _update(tool, definition, fingerprint, now):
-    """Refresh what the server says about an existing tool. True when the definition moved.
+def _update(tool, definition, fingerprint, now, *, disable_on_change=False):
+    """Refresh what the server says about an existing tool.
 
-    ``enabled`` and ``writable`` are the operator's two columns and are never written here. A
-    changed definition is reported so somebody can look at it; acting on it is a policy decision,
-    and this app holds no policy.
+    Returns (definition_moved, was_disabled).
+
+    ``writable`` is the operator's column and is never written here. ``enabled`` is too, with one
+    opt-in exception: when ``disable_on_definition_change`` is set and the fingerprint moves under a
+    tool that was on, this clears it. The fingerprint exists precisely because a compromised or
+    careless server can rewrite a tool's description while leaving its arguments alone, and merely
+    reporting that leaves the tool on offer until somebody reads the log. The row keeps its
+    schema, its description and its review history, so one click puts it back.
+
+    The setting defaults to off, which is today's behaviour: report the change and hold no policy.
     """
     changed = tool.definition_fingerprint != fingerprint
 
@@ -357,7 +386,9 @@ def _update(tool, definition, fingerprint, now):
         # Nothing to write but the timestamp, and this is a change-logged model: a nightly run
         # against a forty-tool server would otherwise file forty ObjectChange rows a night
         # recording that nothing happened. The stamp is worth less than the change log is.
-        return False
+        return False, False
+
+    disabled = changed and disable_on_change and tool.enabled
 
     tool.title = definition.title or ""
     tool.description = definition.description or ""
@@ -366,8 +397,10 @@ def _update(tool, definition, fingerprint, now):
     tool.advertised_read_only = definition.read_only_hint
     tool.definition_fingerprint = fingerprint
     tool.last_seen_at = now
+    if disabled:
+        tool.enabled = False
     tool.validated_save()
-    return changed
+    return changed, disabled
 
 
 def _retire(stale, *, remove_stale):

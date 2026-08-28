@@ -17,6 +17,7 @@ from nautobot.extras.models import Job
 from nautobot_ai_models import filters, forms, models, tables
 from nautobot_ai_models.api import serializers
 from nautobot_ai_models.constants import (
+    AI_MODEL_FIELDS,
     MCP_SERVER_DISCOVERED_COLUMNS,
     MCP_SERVER_OPERATOR_FIELDS,
     MCP_TOOL_DEFINITION_FIELDS,
@@ -71,7 +72,16 @@ class AIModelUIViewSet(NautobotUIViewSet):
             ObjectFieldsPanel(
                 weight=100,
                 section=SectionChoices.LEFT_HALF,
-                fields="__all__",
+                # Explicit rather than "__all__": `default_parameters` is a JSON object and gets
+                # a panel of its own below, the way `capabilities` does on the MCP server view.
+                fields=list(AI_MODEL_FIELDS),
+            ),
+            ObjectTextPanel(
+                weight=200,
+                section=SectionChoices.RIGHT_HALF,
+                label="Default Parameters",
+                object_field="default_parameters",
+                render_as=ObjectTextPanel.RenderOptions.JSON,
             ),
         ],
     )

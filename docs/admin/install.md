@@ -79,3 +79,32 @@ PLUGINS_CONFIG = {
 
 You configure a provider endpoint through a Nautobot External Integration, not through a
 setting. See [External Interactions](../user/external_interactions.md).
+
+### Optional settings
+
+Two optional settings change what an MCP Server Discovery run puts on offer. Both default to the
+behaviour an existing deployment already has, so neither has to be set.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `new_tools_enabled` | `True` | Whether a newly discovered MCP tool arrives switched on. Set it to `False` and a tool arrives with `enabled` cleared, and a person turns it on. |
+| `disable_on_definition_change` | `False` | Whether discovery clears `enabled` on a tool whose definition changed since it was last read. Set it to `True` and such a tool comes back off, keeping its schemas and its review history. |
+
+```python
+PLUGINS_CONFIG = {
+    "nautobot_ai_models": {
+        "new_tools_enabled": False,
+        "disable_on_definition_change": True,
+    },
+}
+```
+
+Both are registry policy rather than call policy, which is why they live here. A consuming app can
+refuse to call a tool, but it cannot stop a second consuming app from calling the same one.
+
+Set `new_tools_enabled` to `False` when registering a server that advertises many tools. Otherwise
+every one of them is on offer to every consuming app before a person has read a single description,
+and in an agent's prompt a tool's description **is** its semantics.
+
+Set `disable_on_definition_change` to `True` when a tool's contract moving is something you want
+acted on rather than reported. See [MCP Tool](../models/mcptool.md#discovery-policy).

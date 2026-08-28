@@ -19,6 +19,7 @@ from nautobot.tenancy.models import Tenant
 
 from nautobot_ai_models import models
 from nautobot_ai_models.constants import (
+    AI_MODEL_FIELDS,
     MCP_SERVER_DISCOVERED_COLUMNS,
     MCP_SERVER_OPERATOR_FIELDS,
     MCP_TOOL_DEFINITION_FIELDS,
@@ -54,7 +55,11 @@ class AIModelFilterSet(NameSearchFilterSet, NautobotFilterSet):  # pylint: disab
         """Meta attributes for filter."""
 
         model = models.AIModel
-        fields = "__all__"
+        # Explicit rather than "__all__". django-filter has no filter for a JSONField, so
+        # `default_parameters` cannot be generated, and a nested blob is not a useful filter in any
+        # case. `capabilities` and the two MCP tool schemas are left out of their filtersets for
+        # exactly the same reason.
+        fields = ["id", *AI_MODEL_FIELDS]  # pylint: disable=nb-use-fields-all
 
 
 class MCPServerFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ancestors

@@ -45,6 +45,10 @@ class DiscoverAIModelsTest(TransactionTestCase):
             enable_new_models=enable_new_models,
         )
 
+    def run_discovery_for_all(self):
+        """Run the Job with no provider selected, so it covers every enabled provider."""
+        return run_job(self.job_model, provider=None, enable_new_models=True)
+
     def log_messages(self, job_result):
         """Return every log message the Job wrote."""
         return [entry.message for entry in JobLogEntry.objects.filter(job_result=job_result)]
@@ -123,6 +127,31 @@ class DiscoverAIModelsTest(TransactionTestCase):
         mock_get.assert_not_called()
         self.assertEqual(self.provider.ai_models.count(), 0)
         self.assertTrue(any("OpenAI-compatible" in message for message in self.log_messages(job_result)))
+
+    @mock.patch("nautobot_ai_models.discovery.requests.get")
+    def test_a_disabled_provider_named_directly_is_skipped(self, mock_get):
+        """An operator who took a provider out of service is told why nothing happened."""
+        self.provider.enabled = False
+        self.provider.validated_save()
+
+        job_result = self.run_discovery()
+
+        mock_get.assert_not_called()
+        self.assertEqual(self.provider.ai_models.count(), 0)
+        self.assertTrue(any("disabled" in message for message in self.log_messages(job_result)))
+
+    @mock.patch("nautobot_ai_models.discovery.requests.get")
+    def test_a_disabled_provider_is_left_out_of_an_all_providers_run(self, mock_get):
+        """A provider taken out of service must not come back the next time discovery runs."""
+        mock_get.return_value = catalog_response(["gpt-4o-mini"])
+        self.provider.enabled = False
+        self.provider.validated_save()
+
+        self.run_discovery_for_all()
+
+        self.assertEqual(self.provider.ai_models.count(), 0)
+        # The other two fixture providers are still enabled, so they were reached.
+        self.assertEqual(models.AIModel.objects.filter(provider__enabled=True).count(), 2)
 
     @mock.patch("nautobot_ai_models.discovery.requests.get")
     def test_request_failure_is_reported_without_details(self, mock_get):

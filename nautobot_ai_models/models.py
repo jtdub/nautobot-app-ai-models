@@ -18,8 +18,9 @@ from django.db import models
 from nautobot.apps.constants import CHARFIELD_MAX_LENGTH
 from nautobot.apps.models import OrganizationalModel, PrimaryModel, extras_features
 
-from nautobot_ai_models.choices import MCPTransportChoices
+from nautobot_ai_models.choices import AIModelKindChoices, AIProviderTypeChoices, MCPTransportChoices
 from nautobot_ai_models.constants import (
+    ALLOWED_MODEL_PARAMETERS,
     COST_DECIMAL_PLACES,
     COST_MAX_DIGITS,
     MAX_TEMPERATURE,
@@ -57,6 +58,29 @@ class AIProvider(OrganizationalModel):  # pylint: disable=too-many-ancestors
         verbose_name="OpenAI-compatible",
         help_text="The endpoint serves the OpenAI API shape, including GET /v1/models.",
     )
+    provider_type = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        choices=AIProviderTypeChoices,
+        default=AIProviderTypeChoices.OPENAI,
+        # Blank exists for one reason: the migration that added this field cannot say what a
+        # provider that was not OpenAI-compatible actually speaks, so it leaves those rows empty
+        # rather than guessing. `clean()` refuses a blank, so no new row can carry one.
+        blank=True,
+        db_index=True,
+        verbose_name="Provider type",
+        help_text=(
+            "Which API dialect this endpoint speaks. A consuming app reads this to decide how to "
+            "address it. Separate from OpenAI-compatible, which only says whether models can be "
+            "discovered here."
+        ),
+    )
+    enabled = models.BooleanField(
+        default=True,
+        help_text=(
+            "Whether this provider is in service. A disabled provider is skipped by discovery and "
+            "is meant to be skipped by any app reading this registry."
+        ),
+    )
     num_predict = models.IntegerField(
         null=True,
         blank=True,
@@ -89,6 +113,41 @@ class AIProvider(OrganizationalModel):  # pylint: disable=too-many-ancestors
         """Stringify instance."""
         return self.name
 
+    def clean(self):
+        """Refuse a provider nothing can address.
+
+        Two checks, both about a consuming app being able to reach the right endpoint.
+
+        A blank ``provider_type`` reaches here only on a row the migration could not answer for.
+        Refusing it makes an operator answer the next time the row is saved, rather than leaving a
+        consuming app to guess a dialect.
+
+        A provider whose type is an address rather than a service needs a remote URL. A client with
+        no URL for one of those falls back to a default endpoint, which is somebody else's API.
+        ``MCPServer.clean()`` does the same thing for the same reason.
+        """
+        super().clean()
+
+        if not self.provider_type:
+            raise ValidationError(
+                {"provider_type": "Say which API dialect this endpoint speaks. Nothing can address it otherwise."}
+            )
+
+        addressed_types = (AIProviderTypeChoices.OPENAI_COMPATIBLE, AIProviderTypeChoices.OLLAMA)
+        if (
+            self.provider_type in addressed_types
+            and self.external_integration_id is not None
+            and not self.external_integration.remote_url
+        ):
+            raise ValidationError(
+                {
+                    "external_integration": (
+                        f"A {self.get_provider_type_display()} provider is an address, not a service. It needs an "
+                        "external integration with a remote URL."
+                    )
+                }
+            )
+
 
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
 class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
@@ -97,6 +156,10 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
     The num_predict and temperature fields are optional overrides. An empty value inherits the
     default from the parent AIProvider. Read the resolved values through resolved_num_predict and
     resolved_temperature.
+
+    Everything else a call needs goes in default_parameters, behind an allowlist. Read that through
+    resolved_parameters, which applies the allowlist a second time and folds the resolved
+    temperature in, so one dictionary is all a consuming app has to build a request from.
     """
 
     # This app catalogs models. It does not group them, so opt out of Dynamic Groups.
@@ -113,6 +176,16 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
         help_text="The model identifier the provider expects, for example gpt-4o-mini.",
     )
     description = models.CharField(max_length=CHARFIELD_MAX_LENGTH, blank=True)
+    kind = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        choices=AIModelKindChoices,
+        default=AIModelKindChoices.CHAT,
+        db_index=True,
+        help_text=(
+            "What this model is for. A chat model and an embedding model are not interchangeable, "
+            "and they are not even the same endpoint. Set by a person: discovery cannot tell them apart."
+        ),
+    )
     enabled = models.BooleanField(default=True, help_text="Consumers should ignore a disabled model.")
     num_predict = models.IntegerField(
         null=True,
@@ -153,6 +226,16 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
             "several times the input price, which is why the two are recorded apart."
         ),
     )
+    default_parameters = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="Default parameters",
+        help_text=(
+            "Extra request parameters to send with every call to this model, as a JSON object. "
+            "Only the keys on this app's allowlist are accepted, so that nothing here can change "
+            "which host answers."
+        ),
+    )
 
     class Meta:
         """Meta class."""
@@ -168,6 +251,39 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
         """Stringify instance."""
         return f"{self.provider.name}: {self.name}"
 
+    def clean(self):
+        """Refuse a default parameter this app has not vetted.
+
+        The allowlist is checked here and again in `resolved_parameters`. Once is not enough: a
+        fixture, a data migration, or a direct ORM write never runs this method, and the read side
+        is where a key that got past it would be handed to a client.
+        """
+        super().clean()
+
+        if not isinstance(self.default_parameters, dict):
+            raise ValidationError({"default_parameters": "Default parameters must be a JSON object."})
+
+        rejected = sorted(key for key in self.default_parameters if key not in ALLOWED_MODEL_PARAMETERS)
+        if rejected:
+            raise ValidationError(
+                {
+                    "default_parameters": (
+                        f"These parameters are not on the allowlist: {', '.join(rejected)}. "
+                        f"Accepted keys are: {', '.join(ALLOWED_MODEL_PARAMETERS)}."
+                    )
+                }
+            )
+
+    @property
+    def is_available(self):
+        """Whether this registry offers the model at all.
+
+        A model on a disabled provider is not on offer however the model itself is flagged. Saves a
+        consuming app asking two questions, and matches `MCPTool.is_available` on the MCP half.
+        """
+        # pylint: disable=no-member  # pylint-django cannot resolve the ForeignKey target here.
+        return self.enabled and self.provider.enabled
+
     @property
     def resolved_num_predict(self):
         """Return this model's num_predict, or the provider default when unset."""
@@ -176,9 +292,40 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
 
     @property
     def resolved_temperature(self):
-        """Return this model's temperature, or the provider default when unset."""
+        """Return the effective temperature: this model's column, then its parameters, then the provider.
+
+        `temperature` is on the parameter allowlist as well as being a column, so an operator can
+        set it in two places. The column wins, because it is the field they see on the form.
+        `resolved_parameters` applies the same order, so both properties always agree.
+        """
         # pylint: disable=no-member  # pylint-django cannot resolve the ForeignKey target here.
-        return self.temperature if self.temperature is not None else self.provider.temperature
+        if self.temperature is not None:
+            return self.temperature
+        from_parameters = (self.default_parameters or {}).get("temperature")
+        if from_parameters is not None:
+            return from_parameters
+        return self.provider.temperature
+
+    @property
+    def resolved_parameters(self):
+        """Return the request parameters for this model, checked against the allowlist a second time.
+
+        The read-time half of the allowlist. `clean()` catches what a form or the REST API writes;
+        this catches what a fixture, a data migration, or a direct ORM write put in the column,
+        none of which run `clean()`. An unknown key is dropped rather than raised on: a consuming
+        app reading the registry wants the parameters it can trust, not an exception.
+        """
+        parameters = {
+            key: value for key, value in (self.default_parameters or {}).items() if key in ALLOWED_MODEL_PARAMETERS
+        }
+
+        temperature = self.resolved_temperature
+        if temperature is not None:
+            parameters["temperature"] = temperature
+        else:
+            parameters.pop("temperature", None)
+
+        return parameters
 
 
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")

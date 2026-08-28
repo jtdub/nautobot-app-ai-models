@@ -41,6 +41,32 @@ model keeps what the server claimed apart from what a person decided:
 `definition_fingerprint` and `last_seen_at` are read-only over the REST API. `enabled` and
 `writable` are not: setting those over the API is a supported thing to do.
 
+## Discovery policy
+
+Two optional settings change what a discovery run puts on offer. Both default to the behaviour an
+existing deployment already has. See [Install](../admin/install.md#optional-settings) for where to
+put them.
+
+### `new_tools_enabled`
+
+Default `True`: a newly discovered tool arrives switched on. Set it to `False` and discovery writes
+`enabled = False` on a new tool, and a person turns it on.
+
+`writable` and `enabled` answer different questions, which is why the careful default on one does
+not cover the other. `writable` says a tool needs review before each call. `enabled` says the tool
+is on offer at all. A tool nobody has read is not merely one that changes something: it is one
+whose description nobody has checked.
+
+### `disable_on_definition_change`
+
+Default `False`: a tool whose `definition_fingerprint` moved is reported in the job log and stays on
+offer. Set it to `True` and discovery clears `enabled` on such a tool, when the tool was on.
+
+The fingerprint exists because a compromised or careless server can rewrite a tool's description
+while leaving its arguments alone. The tool keeps its row, its schemas, its `writable` value and
+its `last_seen_at`, so one click puts it back in service. The job log names a tool that was
+switched off separately from one that merely changed.
+
 ## `is_available`
 
 A read-only property, also exposed in the REST API. `True` when the tool is enabled **and** its

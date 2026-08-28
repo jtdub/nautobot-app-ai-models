@@ -24,6 +24,10 @@ class AIProviderSerializer(NautobotModelSerializer):  # pylint: disable=too-many
 class AIModelSerializer(NautobotModelSerializer):  # pylint: disable=too-many-ancestors
     """AI Model Serializer."""
 
+    # A model on a disabled provider is not on offer however the model itself is flagged. Exposed
+    # so a consuming app can ask one question instead of two, as MCPToolSerializer already does.
+    is_available = drf_serializers.BooleanField(read_only=True)
+
     class Meta:
         """Meta attributes."""
 

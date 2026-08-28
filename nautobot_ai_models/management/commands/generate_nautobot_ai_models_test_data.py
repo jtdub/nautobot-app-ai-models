@@ -4,15 +4,30 @@ from django.core.management.base import BaseCommand
 from django.db import DEFAULT_DB_ALIAS
 from nautobot.extras.models import ExternalIntegration
 
-from nautobot_ai_models.choices import MCPTransportChoices
+from nautobot_ai_models.choices import AIModelKindChoices, AIProviderTypeChoices, MCPTransportChoices
 from nautobot_ai_models.models import AIModel, AIProvider, MCPServer, MCPTool
 
 INTEGRATION_NAME = "AI Models Demo Integration"
 
+#: Name, dialect, OpenAI-compatible, and the models to hang off it. Each model carries its kind,
+#: so the demo data shows a chat model and an embedding model side by side.
+#:
+#: "Demo Ollama" is the case worth demonstrating: it is OpenAI-compatible and still has its own
+#: dialect, because its compatibility layer does not return tool calls.
 PROVIDERS = (
-    ("Demo OpenAI", True, ("gpt-4o", "gpt-4o-mini")),
-    ("Demo Ollama", True, ("llama3", "mistral")),
-    ("Demo Custom", False, ()),
+    (
+        "Demo OpenAI",
+        AIProviderTypeChoices.OPENAI,
+        True,
+        (("gpt-4o", AIModelKindChoices.CHAT), ("text-embedding-3-small", AIModelKindChoices.EMBEDDING)),
+    ),
+    (
+        "Demo Ollama",
+        AIProviderTypeChoices.OLLAMA,
+        True,
+        (("llama3", AIModelKindChoices.CHAT), ("nomic-embed-text", AIModelKindChoices.EMBEDDING)),
+    ),
+    ("Demo Custom", AIProviderTypeChoices.ANTHROPIC, False, ()),
 )
 
 MCP_SERVERS = (
@@ -46,13 +61,17 @@ class Command(BaseCommand):
             defaults={"remote_url": "https://llm.example.com/v1", "verify_ssl": True, "timeout": 30},
         )
 
-        for name, openai_compatible, model_names in PROVIDERS:
+        for name, provider_type, openai_compatible, model_specs in PROVIDERS:
             provider, _ = AIProvider.objects.using(db).get_or_create(
                 name=name,
-                defaults={"external_integration": integration, "openai_compatible": openai_compatible},
+                defaults={
+                    "external_integration": integration,
+                    "provider_type": provider_type,
+                    "openai_compatible": openai_compatible,
+                },
             )
-            for model_name in model_names:
-                AIModel.objects.using(db).get_or_create(provider=provider, name=model_name)
+            for model_name, kind in model_specs:
+                AIModel.objects.using(db).get_or_create(provider=provider, name=model_name, defaults={"kind": kind})
 
         for name, transport, tool_names in MCP_SERVERS:
             server, _ = MCPServer.objects.using(db).get_or_create(
@@ -67,8 +86,9 @@ class Command(BaseCommand):
         mcp_names = [name for name, _, _ in MCP_SERVERS]
         MCPTool.objects.using(db).filter(mcp_server__name__in=mcp_names).delete()
         MCPServer.objects.using(db).filter(name__in=mcp_names).delete()
-        AIModel.objects.using(db).filter(provider__name__in=[name for name, _, _ in PROVIDERS]).delete()
-        AIProvider.objects.using(db).filter(name__in=[name for name, _, _ in PROVIDERS]).delete()
+        provider_names = [name for name, _, _, _ in PROVIDERS]
+        AIModel.objects.using(db).filter(provider__name__in=provider_names).delete()
+        AIProvider.objects.using(db).filter(name__in=provider_names).delete()
         ExternalIntegration.objects.using(db).filter(name=INTEGRATION_NAME).delete()
 
     def handle(self, *args, **options):

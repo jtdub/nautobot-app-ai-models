@@ -5,6 +5,8 @@ from nautobot.apps.tables import BaseTable, BooleanColumn, ButtonsColumn, Linked
 
 from nautobot_ai_models import models
 from nautobot_ai_models.constants import (
+    AI_MODEL_FIELDS,
+    AI_MODEL_NUMERIC_FIELDS,
     MCP_SERVER_DISCOVERED_COLUMNS,
     MCP_SERVER_OPERATOR_FIELDS,
     MCP_TOOL_DEFINITION_FIELDS,
@@ -19,6 +21,8 @@ class AIProviderTable(BaseTable):
     name = tables.Column(linkify=True)
     external_integration = tables.Column(linkify=True)
     openai_compatible = BooleanColumn(verbose_name="OpenAI-compatible")
+    provider_type = tables.Column(verbose_name="Provider Type")
+    enabled = BooleanColumn()
     ai_model_count = LinkedCountColumn(
         viewname="plugins:nautobot_ai_models:aimodel_list",
         url_params={"provider": "name"},
@@ -38,18 +42,23 @@ class AIProviderTable(BaseTable):
             "name",
             "description",
             "external_integration",
+            "provider_type",
             "openai_compatible",
+            "enabled",
             "num_predict",
             "temperature",
             "ai_model_count",
             "actions",
         )
+        # `openai_compatible` is off by default now that `provider_type` is here. The two answer
+        # different questions, but only one of them is read before every call.
         default_columns = (
             "pk",
             "name",
             "description",
             "external_integration",
-            "openai_compatible",
+            "provider_type",
+            "enabled",
             "ai_model_count",
             "actions",
         )
@@ -62,6 +71,7 @@ class AIModelTable(BaseTable):
     pk = ToggleColumn()
     name = tables.Column(linkify=True)
     provider = tables.Column(linkify=True, verbose_name="AI Provider")
+    kind = tables.Column(verbose_name="Kind")
     enabled = BooleanColumn()
     actions = ButtonsColumn(
         models.AIModel,
@@ -72,24 +82,14 @@ class AIModelTable(BaseTable):
         """Meta attributes."""
 
         model = models.AIModel
-        fields = (
-            "pk",
-            "name",
-            "provider",
-            "description",
-            "enabled",
-            "num_predict",
-            "temperature",
-            "input_cost_per_million",
-            "output_cost_per_million",
-            "actions",
-        )
+        # `default_parameters` is available as a column but off by default: a JSON object does not
+        # fit a table row.
+        fields = ("pk", *AI_MODEL_FIELDS, "default_parameters", "actions")
+        # The numeric columns are off by default: a list is for finding a model, and a price or a
+        # token limit is read on the record itself.
         default_columns = (
             "pk",
-            "name",
-            "provider",
-            "description",
-            "enabled",
+            *(field for field in AI_MODEL_FIELDS if field not in AI_MODEL_NUMERIC_FIELDS),
             "actions",
         )
 

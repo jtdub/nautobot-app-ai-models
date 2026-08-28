@@ -7,6 +7,7 @@ from nautobot.apps.testing import ModelTestCases
 from nautobot.extras.models import ExternalIntegration
 
 from nautobot_ai_models import models
+from nautobot_ai_models.choices import AIModelKindChoices, AIProviderTypeChoices
 from nautobot_ai_models.tests import fixtures
 
 
@@ -28,6 +29,8 @@ class TestAIProvider(ModelTestCases.BaseModelTestCase):
         self.assertEqual(provider.name, "Development")
         self.assertEqual(provider.description, "")
         self.assertTrue(provider.openai_compatible)
+        self.assertTrue(provider.enabled)
+        self.assertEqual(provider.provider_type, AIProviderTypeChoices.OPENAI)
         self.assertIsNone(provider.num_predict)
         self.assertIsNone(provider.temperature)
         self.assertEqual(str(provider), "Development")
@@ -53,6 +56,62 @@ class TestAIProvider(ModelTestCases.BaseModelTestCase):
         models.AIProvider.objects.create(name="Protected AIProvider", external_integration=integration)
         with self.assertRaises(ProtectedError):
             integration.delete()
+
+
+class TestAIProviderDialect(ModelTestCases.BaseModelTestCase):
+    """Test the two fields a consuming app reads before it addresses a provider."""
+
+    model = models.AIProvider
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AIProvider model."""
+        super().setUpTestData()
+        fixtures.create_ai_provider()
+
+    def test_a_blank_provider_type_is_refused(self):
+        """Only the migration writes a blank, and only for a row it could not answer for."""
+        provider = models.AIProvider.objects.get(name="Test One")
+        provider.provider_type = ""
+        with self.assertRaises(ValidationError):
+            provider.validated_save()
+
+    def test_an_addressed_provider_needs_a_remote_url(self):
+        """An OpenAI-compatible or Ollama endpoint is an address, not a service."""
+        integration = fixtures.create_external_integration(name="No Remote URL", remote_url="")
+        provider = models.AIProvider(
+            name="Self Hosted",
+            external_integration=integration,
+            provider_type=AIProviderTypeChoices.OPENAI_COMPATIBLE,
+        )
+        with self.assertRaises(ValidationError):
+            provider.validated_save()
+
+    def test_a_named_service_does_not_need_a_remote_url(self):
+        """A client reaching openai.com or Anthropic already knows the address."""
+        integration = fixtures.create_external_integration(name="Named Service", remote_url="")
+        provider = models.AIProvider(
+            name="Hosted Anthropic",
+            external_integration=integration,
+            provider_type=AIProviderTypeChoices.ANTHROPIC,
+        )
+        provider.validated_save()
+        self.assertEqual(provider.provider_type, AIProviderTypeChoices.ANTHROPIC)
+
+    def test_the_dialect_is_separate_from_the_discovery_flag(self):
+        """The two fields answer different questions and must be settable apart.
+
+        Ollama is the case that makes them distinct: its compatibility layer serves /v1/models, so
+        the boolean is true, but that layer drops tool calls, so the dialect is its native API.
+        """
+        provider = models.AIProvider.objects.get(name="Test Three")
+        provider.provider_type = AIProviderTypeChoices.OLLAMA
+        provider.openai_compatible = True
+        provider.validated_save()
+
+        provider.refresh_from_db()
+        self.assertEqual(provider.provider_type, AIProviderTypeChoices.OLLAMA)
+        self.assertTrue(provider.openai_compatible)
 
 
 class TestAIModel(ModelTestCases.BaseModelTestCase):
@@ -117,6 +176,95 @@ class TestAIModel(ModelTestCases.BaseModelTestCase):
         ai_model.input_cost_per_million = "-1.0000"
         with self.assertRaises(ValidationError):
             ai_model.validated_save()
+
+    def test_kind_defaults_to_chat(self):
+        """Every row that existed before this field means what it always meant."""
+        provider = models.AIProvider.objects.get(name="Test One")
+        ai_model = models.AIModel.objects.create(provider=provider, name="new-model")
+        self.assertEqual(ai_model.kind, AIModelKindChoices.CHAT)
+
+    def test_a_model_on_a_disabled_provider_is_not_available(self):
+        """The model's own flag is untouched. One question replaces two."""
+        provider = models.AIProvider.objects.get(name="Test One")
+        ai_model = models.AIModel.objects.get(provider=provider, name="Test One")
+        self.assertTrue(ai_model.is_available)
+
+        provider.enabled = False
+        provider.validated_save()
+
+        ai_model.refresh_from_db()
+        self.assertTrue(ai_model.enabled)
+        self.assertFalse(ai_model.is_available)
+
+    def test_a_parameter_outside_the_allowlist_is_refused(self):
+        """`base_url` decides who answers, so it is not a parameter this registry will hold."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        ai_model.default_parameters = {"seed": 7, "base_url": "https://attacker.example.com/v1"}
+        with self.assertRaises(ValidationError):
+            ai_model.validated_save()
+
+    def test_a_parameter_outside_the_allowlist_is_dropped_at_read_time(self):
+        """A fixture, a data migration or a direct ORM write never runs clean(). This is the net."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        # Deliberately bypassing validation, which is the case this property exists for.
+        models.AIModel.objects.filter(pk=ai_model.pk).update(
+            default_parameters={"seed": 7, "base_url": "https://attacker.example.com/v1"}
+        )
+
+        ai_model.refresh_from_db()
+        self.assertEqual(ai_model.resolved_parameters, {"seed": 7})
+
+    def test_default_parameters_must_be_an_object(self):
+        """A list or a string is not a set of request parameters."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        ai_model.default_parameters = ["seed"]
+        with self.assertRaises(ValidationError):
+            ai_model.validated_save()
+
+    def test_the_temperature_column_wins_over_the_parameter(self):
+        """Set in both places, an operator gets the field they see on the form."""
+        provider = models.AIProvider.objects.get(name="Test One")
+        provider.temperature = "0.10"
+        provider.validated_save()
+
+        ai_model = models.AIModel.objects.get(provider=provider, name="Test One")
+        ai_model.temperature = "1.20"
+        ai_model.default_parameters = {"temperature": 0.40, "seed": 7}
+        ai_model.validated_save()
+
+        self.assertEqual(str(ai_model.resolved_temperature), "1.20")
+        self.assertEqual(str(ai_model.resolved_parameters["temperature"]), "1.20")
+        self.assertEqual(ai_model.resolved_parameters["seed"], 7)
+
+    def test_the_parameter_wins_over_the_provider_default(self):
+        """With no column set, the parameter is more specific than the provider."""
+        provider = models.AIProvider.objects.get(name="Test One")
+        provider.temperature = "0.10"
+        provider.validated_save()
+
+        ai_model = models.AIModel.objects.get(provider=provider, name="Test One")
+        ai_model.default_parameters = {"temperature": 0.40}
+        ai_model.validated_save()
+
+        self.assertEqual(ai_model.resolved_temperature, 0.40)
+        self.assertEqual(ai_model.resolved_parameters["temperature"], 0.40)
+
+    def test_resolved_parameters_falls_back_to_the_provider(self):
+        """With neither the column nor the parameter set, the provider default is used."""
+        provider = models.AIProvider.objects.get(name="Test One")
+        provider.temperature = "0.10"
+        provider.validated_save()
+
+        ai_model = models.AIModel.objects.get(provider=provider, name="Test One")
+        self.assertEqual(str(ai_model.resolved_parameters["temperature"]), "0.10")
+
+    def test_resolved_parameters_omits_temperature_when_nobody_set_one(self):
+        """An unset temperature is left out rather than sent as None."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        ai_model.default_parameters = {"seed": 7}
+        ai_model.validated_save()
+
+        self.assertEqual(ai_model.resolved_parameters, {"seed": 7})
 
     def test_a_fraction_of_a_cent_survives(self):
         """A cheap model is quoted in fractions of a cent per million tokens."""
