@@ -28,12 +28,9 @@ def release_notes_pyproject_toml(version):
     pyproject_data = tomllib.loads(pyproject_content)
     release_notes_file = f"docs/admin/release_notes/version_{version}.md"
 
-    # Update the towncrier filename
     if pyproject_data["tool"]["towncrier"].get("filename", "") != release_notes_file:
         pyproject_data["tool"]["towncrier"]["filename"] = release_notes_file
 
-        # Write back the updated content to pyproject.toml
-        # tomllib is not used to write the file because it is not roundtrippable
         new_pyproject_content = []
         in_towncrier_section = False
         for line in pyproject_content.splitlines():
@@ -44,17 +41,15 @@ def release_notes_pyproject_toml(version):
             if in_towncrier_section:
                 if line.strip().startswith("filename"):
                     new_pyproject_content.append(f'filename = "docs/admin/release_notes/version_{version}.md"')
-                    in_towncrier_section = False  # Only replace the first occurrence
+                    in_towncrier_section = False
                 else:
                     new_pyproject_content.append(line)
             else:
                 new_pyproject_content.append(line)
 
         pyproject_file.write_text("\n".join(new_pyproject_content))
-        # Add a newline at the end of the file if it doesn't exist
         if not pyproject_file.read_text().endswith("\n"):
             pyproject_file.write_text(pyproject_file.read_text() + "\n")
-        # Remind the user to update the release notes file.
         print(
             f"\033[33mRemember to update the Release Overview section in the release notes file: {release_notes_file}\033[0m"
         )
@@ -66,7 +61,6 @@ def ensure_release_notes_file(version):
         Path(__file__).parent.parent.parent / "docs" / "admin" / "release_notes" / f"version_{version}.md"
     )
     if not release_notes_file.exists():
-        # Create a new release notes file with a basic template from towncrier_header.txt
         towncrier_header = Path(__file__).parent.parent / "towncrier_header.txt"
         content = towncrier_header.read_text().format(version=version)
         release_notes_file.write_text(content)
@@ -80,7 +74,6 @@ def ensure_mkdocs_version(version):
     if release_notes_nav_entry in mkdocs_yml_content:
         return
 
-    # Add the new release notes entry to the mkdocs.yml content
     if "Release Notes:" in mkdocs_yml_content:
         mkdocs_yml_content = mkdocs_yml_content.replace(
             '          - "admin/release_notes/index.md"\n',

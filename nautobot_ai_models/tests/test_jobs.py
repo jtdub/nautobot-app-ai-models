@@ -1,12 +1,19 @@
-"""Test the model-discovery Job."""
+"""Test the discovery and housekeeping Jobs.
+
+The sample tool below has an unused parameter on purpose: its signature is what the Job reads the
+argument schema from, and a body would prove nothing.
+"""
+# pylint: disable=unused-argument
 
 from unittest import mock
 
+from django.utils import timezone
 from nautobot.apps.testing import TransactionTestCase, get_job_class_and_model
 from nautobot.extras.models import Job, JobLogEntry
 
-from nautobot_ai_models import models
-from nautobot_ai_models.choices import MCPTransportChoices
+from nautobot_ai_models import models, tools
+from nautobot_ai_models.choices import AIAgentThreadStatusChoices, AIToolKindChoices, MCPTransportChoices
+from nautobot_ai_models.models import AIAgentThread, AITool
 from nautobot_ai_models.services import mcp
 from nautobot_ai_models.services.exceptions import MCPCallError
 from nautobot_ai_models.tests import fixtures
@@ -42,8 +49,8 @@ class DiscoverAIModelsTest(TransactionTestCase):
     def run_discovery(self, enable_new_models=True, provider=NOT_GIVEN):
         """Run the Job against the single test provider, or against all of them.
 
-        Pass `provider=None` for the all-providers path. The sentinel is what lets None mean "every
-        provider" rather than "use the default".
+        Pass `provider=None` for the all-providers path. The sentinel lets None mean every provider
+        instead of the default.
         """
         chosen = self.provider if provider is NOT_GIVEN else provider
         return run_job(
@@ -178,9 +185,9 @@ class MCPServerDiscoveryJobTest(TransactionTestCase):
     def setUp(self):
         """Three servers, and the job record that discovers them.
 
-        The fixture spreads its servers over all three transports, which is what the filter tests
-        need. These tests are about which servers the job picks up, so they all start reachable and
-        a test that cares about a skip sets that transport itself.
+        The fixture spreads its servers over all three transports, which the filter tests need. These
+        tests ask which servers the job picks up, so every server starts reachable. A test that cares
+        about a skip sets that transport itself.
         """
         super().setUp()
         self.servers = fixtures.create_mcpserver()
@@ -298,10 +305,10 @@ class MCPServerDiscoveryJobTest(TransactionTestCase):
     @mock.patch("nautobot_ai_models.jobs.mcp.require_client", mock.Mock())
     @mock.patch("nautobot_ai_models.jobs.mcp.discover")
     def test_a_failure_never_writes_the_endpoint_into_the_log(self, discover):
-        """An HTTP client's own message embeds the request URL, and a remote URL may carry a secret.
+        """An HTTP client message embeds the request URL, and a remote URL may carry a secret.
 
-        The job log is readable by every holder of `extras.view_jobresult`, which is a wider
-        audience than the one that may read the Secrets Group the credential came from.
+        Every holder of `extras.view_jobresult` reads the job log. That is a wider audience than the
+        one that may read the Secrets Group the credential came from.
         """
         discover.side_effect = MCPCallError("HTTPStatusError: 401 for https://svc:hunter2@mcp.internal/mcp")
 
@@ -310,3 +317,177 @@ class MCPServerDiscoveryJobTest(TransactionTestCase):
         messages = " ".join(self._log_messages(result))
         self.assertNotIn("hunter2", messages)
         self.assertNotIn("svc:", messages)
+
+
+class SyncAIToolsTest(TransactionTestCase):
+    """Test the Sync AI Tools Job.
+
+    This is discovery, with the in-process registry in place of a remote endpoint. The Job obeys
+    the same two policies that govern MCP tools.
+    """
+
+    databases = ("default", "job_logs")
+
+    def setUp(self):
+        """Start from an empty registry and no tool records."""
+        super().setUp()
+        self.addCleanup(tools.clear_registry)
+        tools.clear_registry()
+        AITool.objects.all().delete()
+        self.job_class, self.job_model = get_job_class_and_model("nautobot_ai_models.jobs", "SyncAITools")
+
+    @staticmethod
+    def register(name="lookup_device", description="Look up one device by hostname.", writable=False):
+        """Register one tool.
+
+        Args:
+            name: The tool's name.
+            description: The tool's description.
+            writable: Whether it writes.
+        """
+
+        def sample(hostname: str) -> str:
+            pass
+
+        tools.register_ai_tool(sample, name=name, description=description, writable=writable)
+
+    @staticmethod
+    def policy(**overrides):
+        """Override the two registry policy settings for one block.
+
+        `override_settings(PLUGINS_CONFIG=...)` would replace the configuration of every installed
+        app, so this patches the reader instead.
+
+        Args:
+            **overrides: Settings to change.
+
+        Returns:
+            The patcher, for use as a context manager.
+        """
+        defaults = {"new_tools_enabled": True, "disable_on_definition_change": False, **overrides}
+        return mock.patch("nautobot_ai_models.services.tool_records.app_setting", side_effect=defaults.get)
+
+    def test_a_new_tool_is_written(self):
+        """The ordinary case: code declared it, so the registry records it."""
+        self.register()
+
+        run_job(self.job_model, dry_run=False)
+
+        tool = AITool.objects.get(name="lookup_device")
+        self.assertEqual(tool.kind, AIToolKindChoices.REGISTERED)
+        self.assertEqual(tool.description, "Look up one device by hostname.")
+        self.assertTrue(tool.definition_fingerprint)
+        self.assertIsNotNone(tool.last_seen_at)
+
+    def test_a_new_tool_honours_new_tools_enabled(self):
+        """The same setting that keeps a newly discovered MCP tool out of an agent's hands."""
+        self.register()
+
+        with self.policy(new_tools_enabled=False):
+            run_job(self.job_model, dry_run=False)
+
+        self.assertFalse(AITool.objects.get(name="lookup_device").enabled)
+
+    def test_what_the_tool_said_lands_beside_what_a_person_decided(self):
+        """Two flags, not one, exactly as MCPTool keeps them."""
+        self.register(writable=False)
+
+        run_job(self.job_model, dry_run=False)
+
+        tool = AITool.objects.get(name="lookup_device")
+        self.assertFalse(tool.writable)
+        self.assertTrue(tool.advertised_read_only)
+
+    def test_a_dry_run_writes_nothing(self):
+        """Reporting what would change is not changing it."""
+        self.register()
+
+        run_job(self.job_model, dry_run=True)
+
+        self.assertFalse(AITool.objects.filter(name="lookup_device").exists())
+
+    def test_a_changed_definition_is_reported(self):
+        """The description is what the model reads, so a change to it is a change to the tool."""
+        self.register()
+        run_job(self.job_model, dry_run=False)
+        before = AITool.objects.get(name="lookup_device").definition_fingerprint
+
+        tools.clear_registry()
+        self.register(description="Look up one device. Returns the site code as well.")
+        run_job(self.job_model, dry_run=False)
+
+        self.assertNotEqual(AITool.objects.get(name="lookup_device").definition_fingerprint, before)
+
+    def test_a_changed_definition_can_take_a_tool_out_of_service(self):
+        """`disable_on_definition_change`, applied to the second tool source."""
+        self.register()
+        run_job(self.job_model, dry_run=False)
+        AITool.objects.filter(name="lookup_device").update(enabled=True)
+
+        tools.clear_registry()
+        self.register(description="Something else entirely.")
+        with self.policy(disable_on_definition_change=True):
+            run_job(self.job_model, dry_run=False)
+
+        self.assertFalse(AITool.objects.get(name="lookup_device").enabled)
+
+    def test_a_persons_decision_survives_a_sync(self):
+        """A redeclaration in code is not a review. `writable` is never written by the Job."""
+        self.register(writable=True)
+        run_job(self.job_model, dry_run=False)
+        AITool.objects.filter(name="lookup_device").update(writable=False)
+
+        run_job(self.job_model, dry_run=False)
+
+        self.assertFalse(AITool.objects.get(name="lookup_device").writable)
+
+    def test_a_tool_that_stopped_being_registered_is_kept(self):
+        """Its name may be on an approved call, and its app may be halfway through an upgrade."""
+        self.register()
+        run_job(self.job_model, dry_run=False)
+
+        tools.clear_registry()
+        run_job(self.job_model, dry_run=False)
+
+        self.assertTrue(AITool.objects.filter(name="lookup_device").exists())
+
+
+class PruneAgentThreadsTest(TransactionTestCase):
+    """Test the Prune Agent Threads Job."""
+
+    databases = ("default", "job_logs")
+
+    def setUp(self):
+        """Create the threads and find the Job."""
+        super().setUp()
+        fixtures.create_aiagentthread()
+        self.job_class, self.job_model = get_job_class_and_model("nautobot_ai_models.jobs", "PruneAgentThreads")
+
+    def test_a_dry_run_deletes_nothing(self):
+        """Reporting what would go is not deleting it."""
+        AIAgentThread.objects.update(started_at=timezone.now() - timezone.timedelta(days=365))
+        before = AIAgentThread.objects.count()
+
+        run_job(self.job_model, days=1, delete_rows=True, dry_run=True)
+
+        self.assertEqual(AIAgentThread.objects.count(), before)
+
+    def test_a_finished_thread_past_the_window_goes(self):
+        """The one case that prunes."""
+        AIAgentThread.objects.update(started_at=timezone.now() - timezone.timedelta(days=365))
+        expected = AIAgentThread.objects.filter(
+            status__in=(AIAgentThreadStatusChoices.COMPLETED, AIAgentThreadStatusChoices.FAILED)
+        ).count()
+        before = AIAgentThread.objects.count()
+
+        run_job(self.job_model, days=1, delete_rows=True, dry_run=False)
+
+        self.assertEqual(AIAgentThread.objects.count(), before - expected)
+
+    def test_a_waiting_thread_is_left_alone(self):
+        """Deleting its state throws away a decision somebody was asked to make."""
+        AIAgentThread.objects.update(started_at=timezone.now() - timezone.timedelta(days=365))
+
+        run_job(self.job_model, days=1, delete_rows=True, dry_run=False)
+
+        self.assertTrue(AIAgentThread.objects.filter(status=AIAgentThreadStatusChoices.WAITING).exists())

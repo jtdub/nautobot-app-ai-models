@@ -1,15 +1,23 @@
-"""Test the AIProvider and AIModel models."""
+"""Test the registry models."""
 
 import json
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db.models import ProtectedError
 from django.db.utils import IntegrityError
 from nautobot.apps.testing import ModelTestCases, TestCase
-from nautobot.extras.models import ExternalIntegration
+from nautobot.extras.models import ExternalIntegration, GitRepository
 
 from nautobot_ai_models import models
-from nautobot_ai_models.choices import AIModelKindChoices, AIProviderTypeChoices
+from nautobot_ai_models.choices import (
+    AIAgentPatternChoices,
+    AIAgentThreadStatusChoices,
+    AIModelKindChoices,
+    AIProviderTypeChoices,
+    AIToolKindChoices,
+    SubagentInputModeChoices,
+)
 from nautobot_ai_models.tests import fixtures
 
 
@@ -91,8 +99,8 @@ class TestAIProvider(ModelTestCases.BaseModelTestCase):
     def test_the_dialect_is_separate_from_the_discovery_flag(self):
         """The two fields answer different questions and must be settable apart.
 
-        Ollama is the case that makes them distinct: its compatibility layer serves /v1/models, so
-        the boolean is true, but that layer drops tool calls, so the dialect is its native API.
+        Ollama makes them distinct. Its compatibility layer serves /v1/models, so the boolean is true,
+        but that layer drops tool calls, so the dialect is its native API.
         """
         provider = models.AIProvider.objects.get(name="Test Three")
         provider.provider_type = AIProviderTypeChoices.OLLAMA
@@ -211,8 +219,8 @@ class TestAIModel(ModelTestCases.BaseModelTestCase):
 class TestAIModelParameters(TestCase):
     """The default-parameter allowlist, and the values read back through it.
 
-    A plain TestCase rather than a second BaseModelTestCase: the generic model tests already
-    run against AIModel above, and a second one would run every one of them again.
+    This is a plain TestCase, not a second BaseModelTestCase. The generic model tests already run
+    against AIModel above, and a second one would run every one of them again.
     """
 
     @classmethod
@@ -283,8 +291,8 @@ class TestAIModelParameters(TestCase):
     def test_temperature_precedence(self):
         """The column wins, then the parameter, then the provider default.
 
-        Both properties are asserted on every row, because they must never disagree. Compared as
-        numbers: ``resolved_temperature`` returns the winning source's type, and
+        This test asserts both properties on every row, because they must never disagree. It compares
+        them as numbers: ``resolved_temperature`` returns the winning source's type, and
         ``resolved_parameters`` always returns a float.
         """
         cases = (
@@ -408,3 +416,364 @@ class TestMCPTool(ModelTestCases.BaseModelTestCase):
         self.server.validated_save()
         tool.refresh_from_db()
         self.assertFalse(tool.is_available)
+
+
+class TestAITool(ModelTestCases.BaseModelTestCase):
+    """Test AITool."""
+
+    model = models.AITool
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AITool model."""
+        super().setUpTestData()
+        fixtures.create_aitool()
+
+    def test_the_name_is_the_natural_key(self):
+        """A tool is found by the name it is called by, not by a surrogate."""
+        tool = models.AITool.objects.get(name="lookup_device")
+        self.assertEqual(tool.natural_key(), ["lookup_device"])
+        self.assertEqual(models.AITool.objects.get_by_natural_key("lookup_device"), tool)
+
+    def test_a_registered_tool_nothing_registered_is_refused(self):
+        """The row is a claim that code exists under that name. An unbacked claim is refused."""
+        tool = models.AITool(name="no_such_tool", description="Nothing declares this.")
+        with self.assertRaises(ValidationError) as raised:
+            tool.full_clean()
+        self.assertIn("name", raised.exception.message_dict)
+
+    def test_a_job_tool_has_to_name_a_job(self):
+        """A Job tool with no Job would start nothing."""
+        fixtures.register_test_tools()
+        tool = models.AITool(name="lookup_device", description="x", kind=AIToolKindChoices.JOB)
+        with self.assertRaises(ValidationError) as raised:
+            tool.full_clean()
+        self.assertIn("job", raised.exception.message_dict)
+
+    def test_a_git_tool_has_to_name_a_repository(self):
+        """The repository is what a later process imports the code from."""
+        tool = models.AITool(name="orphan_tool", description="x", kind=AIToolKindChoices.GIT)
+        with self.assertRaises(ValidationError) as raised:
+            tool.full_clean()
+        self.assertIn("git_repository", raised.exception.message_dict)
+
+    def test_a_git_tool_is_not_checked_against_the_registry(self):
+        """A process that never imported the repository still has to be able to save the record."""
+        repository = GitRepository(
+            name="Model Test Tools",
+            slug="model_test_tools",
+            remote_url="https://example.com/tools.git",
+        )
+        repository.save()
+        tool = models.AITool(
+            name="never_imported_here",
+            description="Declared in a repository this process has not read.",
+            kind=AIToolKindChoices.GIT,
+            git_repository=repository,
+        )
+
+        tool.full_clean()
+
+    def test_is_available_follows_enabled(self):
+        """A disabled tool is not offered."""
+        tool = models.AITool.objects.get(name="unreviewed_tool")
+        self.assertFalse(tool.enabled)
+        self.assertFalse(tool.is_available)
+
+    def test_a_tool_arrives_writable(self):
+        """Guessing wrong this way costs a review; guessing wrong the other way is worse."""
+        tool = models.AITool.objects.create(name="fresh_tool", description="x")
+        self.assertTrue(tool.writable)
+
+
+class TestAIAgent(ModelTestCases.BaseModelTestCase):
+    """Test AIAgent."""
+
+    model = models.AIAgent
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AIAgent model."""
+        super().setUpTestData()
+        fixtures.create_aiagent()
+
+    def test_an_embedding_model_is_refused(self):
+        """An agent talks. An embedding model does not."""
+        embedding = models.AIModel.objects.filter(kind=AIModelKindChoices.EMBEDDING).first()
+        agent = models.AIAgent(name="Wrong Kind", system_prompt="x", model=embedding)
+        with self.assertRaises(ValidationError) as raised:
+            agent.full_clean()
+        self.assertIn("model", raised.exception.message_dict)
+
+    def test_a_subagents_agent_needs_a_subagent(self):
+        """The pattern names a shape. An agent with no specialists is not that shape."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        agent.pattern = AIAgentPatternChoices.SUBAGENTS
+        with self.assertRaises(ValidationError) as raised:
+            agent.full_clean()
+        self.assertIn("pattern", raised.exception.message_dict)
+
+    def test_a_skills_agent_needs_a_skill(self):
+        """The same rule, for the other pattern."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        agent.pattern = AIAgentPatternChoices.SKILLS
+        with self.assertRaises(ValidationError) as raised:
+            agent.full_clean()
+        self.assertIn("pattern", raised.exception.message_dict)
+
+    def test_the_pattern_check_does_not_block_creation(self):
+        """A binding cannot exist before its agent, so a create cannot be asked to have one."""
+        chat = models.AIModel.objects.filter(kind=AIModelKindChoices.CHAT).first()
+        agent = models.AIAgent(
+            name="Fresh Supervisor",
+            system_prompt="x",
+            model=chat,
+            pattern=AIAgentPatternChoices.SUBAGENTS,
+        )
+        agent.full_clean()
+
+    def test_temperature_resolves_agent_then_model_then_provider(self):
+        """One more level on the chain AIModel already has."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        agent.model.provider.temperature = Decimal("0.90")
+        agent.model.provider.save()
+        agent.model.temperature = None
+        agent.model.save()
+
+        self.assertEqual(agent.resolved_temperature, Decimal("0.90"))
+
+        agent.model.temperature = Decimal("0.50")
+        agent.model.save()
+        self.assertEqual(agent.resolved_temperature, Decimal("0.50"))
+
+        agent.temperature = Decimal("0.10")
+        self.assertEqual(agent.resolved_temperature, Decimal("0.10"))
+
+    def test_num_predict_resolves_the_same_way(self):
+        """The completion cap follows the same three levels."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        agent.model.provider.num_predict = 100
+        agent.model.provider.save()
+        agent.model.num_predict = None
+        agent.model.save()
+
+        self.assertEqual(agent.resolved_num_predict, 100)
+
+        agent.num_predict = 7
+        self.assertEqual(agent.resolved_num_predict, 7)
+
+    def test_is_available_follows_the_whole_chain(self):
+        """A disabled provider takes every agent on it out of service."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        self.assertTrue(agent.is_available)
+
+        agent.model.provider.enabled = False
+        agent.model.provider.save()
+        agent.model.refresh_from_db()
+        self.assertFalse(agent.is_available)
+
+    def test_the_model_is_protected_while_an_agent_uses_it(self):
+        """Deleting a catalog row must not silently delete authored work."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        with self.assertRaises(ProtectedError):
+            agent.model.delete()  # pylint: disable=no-member
+
+
+class TestAIAgentTool(ModelTestCases.BaseModelTestCase):
+    """Test AIAgentTool."""
+
+    model = models.AIAgentTool
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AIAgentTool model."""
+        super().setUpTestData()
+        fixtures.create_aiagenttool()
+
+    def test_a_binding_names_exactly_one_tool(self):
+        """Neither is nothing to call; both is two things under one name."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        with self.assertRaises(ValidationError):
+            models.AIAgentTool(agent=agent).full_clean()
+
+        with self.assertRaises(ValidationError):
+            models.AIAgentTool(
+                agent=agent,
+                mcp_tool=models.MCPTool.objects.first(),
+                ai_tool=models.AITool.objects.first(),
+            ).full_clean()
+
+    def test_the_override_is_what_the_model_reads(self):
+        """A name and a description that read badly are why a tool is never called."""
+        binding = models.AIAgentTool.objects.get(name_override="find_device")
+        self.assertEqual(binding.wire_name, "find_device")
+        self.assertEqual(binding.wire_description, "Look up a device. Send it one hostname.")
+
+    def test_no_override_falls_back_to_the_tool(self):
+        """An operator who has nothing to add adds nothing."""
+        binding = models.AIAgentTool.objects.filter(mcp_tool__isnull=False).first()
+        self.assertEqual(binding.wire_name, binding.mcp_tool.name)
+        self.assertEqual(binding.wire_description, binding.mcp_tool.description)
+
+    def test_writable_reads_through_to_the_tool(self):
+        """Stored twice is stored wrong. One answer, read from the target."""
+        binding = models.AIAgentTool.objects.filter(mcp_tool__isnull=False).first()
+        self.assertEqual(binding.writable, binding.mcp_tool.writable)
+
+        binding.mcp_tool.writable = not binding.mcp_tool.writable
+        binding.mcp_tool.save()
+        binding.refresh_from_db()
+        self.assertEqual(binding.writable, binding.mcp_tool.writable)
+
+    def test_the_fingerprint_comes_from_the_target(self):
+        """Whichever source, an approval is checked against the same idea."""
+        binding = models.AIAgentTool.objects.filter(ai_tool__isnull=False).first()
+        self.assertEqual(binding.fingerprint, binding.ai_tool.definition_fingerprint)
+
+    def test_a_tool_is_bound_to_an_agent_once(self):
+        """Twice would offer the model the same tool under two names."""
+        binding = models.AIAgentTool.objects.filter(ai_tool__isnull=False).first()
+        with self.assertRaises(IntegrityError):
+            models.AIAgentTool.objects.create(agent=binding.agent, ai_tool=binding.ai_tool)
+
+    def test_the_tool_is_protected_while_a_binding_uses_it(self):
+        """A tool an agent is bound to is not tidied away by accident."""
+        binding = models.AIAgentTool.objects.filter(ai_tool__isnull=False).first()
+        with self.assertRaises(ProtectedError):
+            binding.ai_tool.delete()  # pylint: disable=no-member
+
+
+class TestAIAgentSubagent(ModelTestCases.BaseModelTestCase):
+    """Test AIAgentSubagent."""
+
+    model = models.AIAgentSubagent
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AIAgentSubagent model."""
+        super().setUpTestData()
+        fixtures.create_aiagentsubagent()
+
+    def test_an_agent_cannot_delegate_to_itself(self):
+        """A specialist that is its own supervisor never returns."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        with self.assertRaises(ValidationError) as raised:
+            models.AIAgentSubagent(parent=agent, subagent=agent).full_clean()
+        self.assertIn("subagent", raised.exception.message_dict)
+
+    def test_a_cycle_is_refused(self):
+        """Building follows these rows, and a cycle in them is a build that never returns."""
+        binding = models.AIAgentSubagent.objects.first()
+        with self.assertRaises(ValidationError) as raised:
+            models.AIAgentSubagent(parent=binding.subagent, subagent=binding.parent).full_clean()
+        self.assertIn("subagent", raised.exception.message_dict)
+
+    def test_a_longer_cycle_is_refused(self):
+        """The walk follows the whole chain, not just one step."""
+        first = models.AIAgentSubagent.objects.first()
+        third = models.AIAgent.objects.get(name="Test Skills Agent")
+        models.AIAgentSubagent.objects.create(parent=first.subagent, subagent=third)
+
+        with self.assertRaises(ValidationError):
+            models.AIAgentSubagent(parent=third, subagent=first.parent).full_clean()
+
+    def test_the_routing_strings_come_from_the_binding(self):
+        """These two decide whether the specialist is called at all."""
+        binding = models.AIAgentSubagent.objects.get(tool_name="inventory_expert")
+        self.assertEqual(binding.wire_name, "inventory_expert")
+        self.assertIn("hostname", binding.wire_description)
+
+    def test_the_input_mode_defaults_to_the_task_alone(self):
+        """Widening the input can activate a rule in the specialist's own prompt."""
+        agent = models.AIAgent.objects.get(name="Test Skills Agent")
+        other = models.AIAgent.objects.get(name="Test Supervisor")
+        binding = models.AIAgentSubagent.objects.create(parent=agent, subagent=other)
+        self.assertEqual(binding.input_mode, SubagentInputModeChoices.TASK_ONLY)
+
+
+class TestAISkill(ModelTestCases.BaseModelTestCase):
+    """Test AISkill."""
+
+    model = models.AISkill
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AISkill model."""
+        super().setUpTestData()
+        fixtures.create_aiskill()
+
+    def test_a_skill_is_available_when_enabled(self):
+        """A disabled skill is not offered."""
+        skill = models.AISkill.objects.first()
+        self.assertTrue(skill.is_available)
+        skill.enabled = False
+        self.assertFalse(skill.is_available)
+
+    def test_the_skill_is_protected_while_an_agent_loads_it(self):
+        """A skill an agent may load is not deleted from under it."""
+        binding = fixtures.create_aiagentskill()[0]
+        with self.assertRaises(ProtectedError):
+            binding.skill.delete()  # pylint: disable=no-member
+
+
+class TestAIAgentSkill(ModelTestCases.BaseModelTestCase):
+    """Test AIAgentSkill."""
+
+    model = models.AIAgentSkill
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AIAgentSkill model."""
+        super().setUpTestData()
+        fixtures.create_aiagentskill()
+
+    def test_a_skill_is_bound_to_an_agent_once(self):
+        """Twice would list the same skill twice in the load tool's description."""
+        binding = models.AIAgentSkill.objects.first()
+        with self.assertRaises(IntegrityError):
+            models.AIAgentSkill.objects.create(agent=binding.agent, skill=binding.skill)
+
+
+class TestAIAgentThread(ModelTestCases.BaseModelTestCase):
+    """Test AIAgentThread."""
+
+    model = models.AIAgentThread
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AIAgentThread model."""
+        super().setUpTestData()
+        fixtures.create_aiagentthread()
+
+    def test_a_thread_gets_an_identifier_of_its_own(self):
+        """The thread_id is what LangGraph checkpoints under, and it is a UUID for a stated reason."""
+        thread = models.AIAgentThread.objects.first()
+        self.assertIsNotNone(thread.thread_id)
+        self.assertLess(len(str(thread.thread_id)), 255)
+
+    def test_two_threads_do_not_share_an_identifier(self):
+        """Two threads sharing one id would share one checkpoint lineage."""
+        identifiers = set(models.AIAgentThread.objects.values_list("thread_id", flat=True))
+        self.assertEqual(len(identifiers), models.AIAgentThread.objects.count())
+
+    def test_is_live_covers_waiting(self):
+        """A thread paused at an interrupt has not finished; somebody has to answer it."""
+        waiting = models.AIAgentThread.objects.get(status=AIAgentThreadStatusChoices.WAITING)
+        self.assertTrue(waiting.is_live)
+
+        done = models.AIAgentThread.objects.get(status=AIAgentThreadStatusChoices.COMPLETED)
+        self.assertFalse(done.is_live)
+
+    def test_a_thread_is_change_logged(self):
+        """A thread changes state two or three times a run, which the change log can carry.
+
+        The per-call records a consuming app keeps are the ones that cannot be logged. A thread is not
+        one of them, and an OrganizationalModel makes every generic Nautobot surface work on it.
+        """
+        self.assertTrue(hasattr(models.AIAgentThread.objects.first(), "to_objectchange"))
+
+    def test_the_agent_is_protected_while_a_thread_records_it(self):
+        """History outlives a tidy-up of the registry."""
+        thread = models.AIAgentThread.objects.first()
+        with self.assertRaises(ProtectedError):
+            thread.agent.delete()  # pylint: disable=no-member

@@ -1,12 +1,13 @@
 """Model discovery against OpenAI-compatible provider endpoints.
 
-Reads the provider's model catalog only. The connection rules match ``services/mcp.py``.
+This module reads the provider's model catalog only. The connection rules match ``services/mcp.py``.
 """
 
 import requests
 from nautobot.apps.choices import SecretsGroupAccessTypeChoices, SecretsGroupSecretTypeChoices
 
-from nautobot_ai_models.constants import DEFAULT_TIMEOUT_SECONDS, MODELS_ENDPOINT
+from nautobot_ai_models.constants import MODELS_ENDPOINT
+from nautobot_ai_models.integrations import integration_timeout, integration_verify
 from nautobot_ai_models.secrets import read_secret
 
 AUTHORIZATION_HEADER = "Authorization"
@@ -65,9 +66,7 @@ def build_verify(integration):
     Returns:
         bool | str: False, a CA file path, or True.
     """
-    if not integration.verify_ssl:
-        return False
-    return integration.ca_file_path or True
+    return integration_verify(integration)
 
 
 def build_timeout(integration):
@@ -80,17 +79,14 @@ def build_timeout(integration):
         int | float: The integration's timeout, or ``DEFAULT_TIMEOUT_SECONDS`` when it carries one
             a request cannot use.
     """
-    timeout = getattr(integration, "timeout", None)
-    if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout <= 0:
-        return DEFAULT_TIMEOUT_SECONDS
-    return timeout
+    return integration_timeout(integration)
 
 
 def fetch_models(provider):
     """Read the model catalog from a provider.
 
-    Honors the integration's timeout, SSL verification, and CA file path. Never returns a header
-    or a token.
+    This function honors the integration's timeout, SSL verification, and CA file path. It never
+    returns a header or a token.
 
     Args:
         provider: The AIProvider to query.

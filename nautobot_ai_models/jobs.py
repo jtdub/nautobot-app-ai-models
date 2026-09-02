@@ -1,18 +1,27 @@
-"""Discovery jobs. Both only read.
+"""Discovery and maintenance jobs.
 
-Each asks a remote endpoint what it offers and writes the answer onto the registry. Neither
-deletes a record unless it is told to.
+Each of the three discovery jobs asks a source what it offers, then writes the answer onto the
+registry. A discovery job deletes no record unless you tell it to, because a source that has a bad
+minute must not erase a reviewed registry.
+
+The fourth job deletes, and it is the only one that does. The LangGraph checkpointer writes into
+tables that Django does not manage, nothing cascades into them, and every shipped saver refuses to
+prune them.
 """
 
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import IntegrityError
 from nautobot.apps.exceptions import SecretError
-from nautobot.apps.jobs import BooleanVar, Job, ObjectVar, register_jobs
+from nautobot.apps.jobs import BooleanVar, IntegerVar, Job, ObjectVar, register_jobs
+from nautobot.extras.models import GitRepository
 
-from nautobot_ai_models import discovery
-from nautobot_ai_models.models import AIModel, AIProvider, MCPServer
-from nautobot_ai_models.services import mcp
+from nautobot_ai_models import discovery, tools
+from nautobot_ai_models.choices import AIToolKindChoices
+from nautobot_ai_models.datasources import CONTENT_IDENTIFIER, module_prefix
+from nautobot_ai_models.models import AIModel, AIProvider, AITool, MCPServer
+from nautobot_ai_models.services import checkpoints, mcp
 from nautobot_ai_models.services.exceptions import MCPError
+from nautobot_ai_models.services.tool_records import sync_tool_records
 
 name = "AI Models"  # pylint: disable=invalid-name
 
@@ -252,5 +261,140 @@ class MCPServerDiscovery(Job):
         return True
 
 
-jobs = [DiscoverAIModels, MCPServerDiscovery]
+class SyncAITools(Job):
+    """Write an AITool record for every Python tool an installed app registered.
+
+    This is discovery, with the registry in place of a remote endpoint. A consuming app declares
+    its tools with `@register_ai_tool` at import time, and this Job reconciles the table against
+    what it declared.
+
+    A tool that a Git repository declared belongs to the repository sync, not to this Job. Both
+    write through `services.tool_records`, so both apply one policy.
+
+    This Job reports a tool that is no longer registered. It never deletes one, because the name
+    may still be on an approved call.
+    """
+
+    class Meta:  # pylint: disable=too-few-public-methods
+        """Meta attributes."""
+
+        name = "Sync AI Tools"
+        description = "Reconcile AITool records with the Python tools registered in this process."
+        has_sensitive_variables = False
+        soft_time_limit = 120
+        time_limit = 300
+
+    dry_run = BooleanVar(
+        default=False,
+        label="Dry run",
+        description="Report what would change and write nothing.",
+    )
+
+    def run(self, *, dry_run):  # pylint: disable=arguments-differ
+        """Reconcile the AITool table with the in-process registry.
+
+        This Job leaves a Git-sourced tool alone. The repository sync owns it, and a claim here would
+        rewrite its record as `registered` and drop the repository it came from.
+
+        Args:
+            dry_run: Report only.
+
+        Returns:
+            str: A one-line summary.
+        """
+        registered = self._tools_this_job_owns()
+        self.logger.info("%s tool(s) registered in this process, outside a Git repository.", len(registered))
+
+        report = sync_tool_records(
+            registered,
+            kind=AIToolKindChoices.REGISTERED,
+            existing=AITool.objects.filter(kind=AIToolKindChoices.REGISTERED),
+            dry_run=dry_run,
+            job_result=self.job_result,
+        )
+        return f"Dry run: {report.summary()}" if dry_run else report.summary()
+
+    @staticmethod
+    def _tools_this_job_owns():
+        """Every registered tool that did not come from a Git repository.
+
+        Returns:
+            dict: The tools, keyed by name.
+        """
+        prefixes = tuple(
+            module_prefix(slug)
+            for slug in GitRepository.objects.filter(provided_contents__contains=CONTENT_IDENTIFIER).values_list(
+                "slug", flat=True
+            )
+        )
+        return {
+            tool_name: tool
+            for tool_name, tool in tools.registered_tools().items()
+            if not any(tool.module == prefix or tool.module.startswith(f"{prefix}.") for prefix in prefixes)
+        }
+
+
+class PruneAgentThreads(Job):
+    """Delete the LangGraph checkpoints of agent threads past the retention window.
+
+    This is the only Job here that deletes anything. The checkpoint tables belong to the saver:
+    Django never migrates them, no foreign key reaches them, and every shipped saver raises
+    NotImplementedError from `prune`.
+
+    This Job leaves a running thread alone, and a thread that waits for a person alone, whatever
+    their age. A waiting thread holds the decision somebody was asked to make.
+    """
+
+    class Meta:  # pylint: disable=too-few-public-methods
+        """Meta attributes."""
+
+        name = "Prune Agent Threads"
+        description = "Delete the checkpoints of finished agent threads past the retention window."
+        has_sensitive_variables = False
+        soft_time_limit = 600
+        time_limit = 900
+
+    days = IntegerVar(
+        required=False,
+        min_value=1,
+        label="Retention days",
+        description="Override the configured window for this run.",
+    )
+    delete_rows = BooleanVar(
+        default=True,
+        label="Delete the thread records too",
+        description="Untick to drop only the checkpoint state and keep the record that the run happened.",
+    )
+    dry_run = BooleanVar(
+        default=False,
+        label="Dry run",
+        description="Report what would be deleted and delete nothing.",
+    )
+
+    def run(self, *, days, delete_rows, dry_run):  # pylint: disable=arguments-differ
+        """Prune expired threads.
+
+        Args:
+            days: Override the configured window.
+            delete_rows: Also delete the AIAgentThread records.
+            dry_run: Report only.
+
+        Returns:
+            str: A one-line summary.
+        """
+        window = days or checkpoints.retention_days()
+        expired = checkpoints.expired_threads(days=window)
+        count = expired.count()
+        self.logger.info("%s finished thread(s) older than %s day(s).", count, window)
+
+        if dry_run:
+            for thread in expired[:20]:
+                self.logger.info("Would prune %s.", thread, extra={"object": thread.agent})
+            return f"Dry run: {count} thread(s) would be pruned."
+
+        result = checkpoints.prune(days=window, delete_rows=delete_rows)
+        return f"Pruned {result['threads']} thread(s) and {result['rows']} checkpoint row(s)."
+
+
+jobs = [DiscoverAIModels, MCPServerDiscovery, SyncAITools, PruneAgentThreads]
 register_jobs(*jobs)

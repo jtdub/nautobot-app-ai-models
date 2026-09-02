@@ -23,8 +23,8 @@ from nautobot_ai_models.tests import fixtures
 class TaskGroupError(Exception):
     """An anyio exception group, on every Python this app supports.
 
-    ``ExceptionGroup`` is a builtin from Python 3.11 and this app supports 3.10. ``_cause()`` reads
-    only the ``exceptions`` attribute.
+    ``ExceptionGroup`` is a builtin from Python 3.11, and this app supports 3.10. ``_cause()``
+    reads the ``exceptions`` attribute only.
     """
 
     def __init__(self, message, exceptions):
@@ -312,10 +312,10 @@ class DiscoverTest(TestCase):
         self.assertTrue(models.MCPTool.objects.get(name="get_device").enabled)
 
     def test_a_hand_entered_tool_is_not_switched_off_on_first_sight(self):
-        """A tool with no fingerprint was never read, so its first reading is not a change.
+        """A tool with no fingerprint was never read, so a first reading is not a change.
 
-        A stdio server cannot be discovered, so its tools are entered by hand. One of those on a
-        server that later becomes reachable must not lose the review that was just done on it.
+        Nautobot cannot discover a stdio server, so a person enters its tools by hand. One of those
+        tools, on a server that later becomes reachable, must not lose the review just done on it.
         """
         by_hand = models.MCPTool.objects.create(
             mcp_server=self.server,
@@ -394,8 +394,8 @@ class DiscoverTest(TestCase):
 class DiscoveryPolicyTest(TestCase):
     """The one place that reads PLUGINS_CONFIG.
 
-    Everything else asks for behaviour by passing a policy, so this is what pins the settings to
-    the behaviour they are supposed to produce.
+    Everything else asks for behaviour with a policy argument, so this pins the settings to the
+    behaviour they must produce.
     """
 
     def test_the_shipped_defaults_are_todays_behaviour(self):
@@ -467,7 +467,7 @@ class ReadSecretTest(TestCase):
         """A group that cannot resolve the secret is the same answer as no group at all.
 
         The server the credential was for refuses the connection itself, and that is the visible
-        symptom. Raising here would turn a configuration problem into a traceback.
+        symptom. A raise here would turn a configuration problem into a traceback.
         """
         group = SecretsGroup.objects.create(name="Empty Group")
         integration = ExternalIntegration.objects.create(
@@ -487,9 +487,9 @@ class ReadSecretTest(TestCase):
 class ErrorReportingTest(TestCase):
     """What a failed discovery says happened.
 
-    The contract is the exception types and nothing else. A client's message embeds the request
-    URL, which an operator may have written a credential into, and it reaches a JobLogEntry that a
-    wider audience can read than the Secrets Group it came from.
+    The contract is the exception types and nothing else. A client message embeds the request URL,
+    an operator may have written a credential into that URL, and the message reaches a JobLogEntry
+    that a wider audience reads than the Secrets Group it came from.
     """
 
     @classmethod
@@ -513,7 +513,7 @@ class ErrorReportingTest(TestCase):
     def test_exception_group_is_unwrapped(self):
         """The MCP client runs on task groups, so the real cause arrives nested.
 
-        Without unwrapping, an operator reads "unhandled errors in a TaskGroup (1 sub-exception)" in
+        Without the unwrap, an operator reads "unhandled errors in a TaskGroup (1 sub-exception)" in
         the Job log, which says nothing about the DNS failure behind it.
         """
         message = self._message(
@@ -553,9 +553,9 @@ class DiscoverableTransportsTest(TestCase):
     def test_only_streamable_http_is_attempted(self):
         """This module speaks streamable HTTP and nothing else.
 
-        Listing another transport here sends its servers through a client that cannot talk to
-        them, and the operator gets an opaque failure instead of the skip notice that tells them
-        to enter the tools by hand.
+        Another transport in this list sends its servers through a client that cannot talk to them.
+        The operator then gets an opaque failure instead of the skip notice that tells them to enter
+        the tools by hand.
         """
         self.assertEqual(mcp.DISCOVERABLE_TRANSPORTS, (MCPTransportChoices.TYPE_STREAMABLE_HTTP,))
         self.assertNotIn(MCPTransportChoices.TYPE_SSE, mcp.DISCOVERABLE_TRANSPORTS)

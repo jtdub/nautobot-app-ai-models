@@ -1,15 +1,13 @@
-"""The MCP service layer: the one module in this app that speaks MCP.
+"""The MCP service layer. This is the one module in this app that speaks MCP.
 
-Asks a server what it offers and writes the answer onto the registry. It calls no tool. The client
-library is imported here only, lazily, behind the optional ``discovery`` extra. A server's own
-annotations are recorded and acted on by nothing.
+This module asks a server what it offers and writes the answer onto the registry. It calls no tool.
+It imports the client library lazily, behind the optional ``discovery`` extra. Nothing acts on the
+annotations a server sends.
 
-``writable`` is never written here. ``enabled`` is written only to turn a tool off.
+This module never writes ``writable``. It writes ``enabled`` only to turn a tool off.
 """
 
 import asyncio
-import hashlib
-import json
 import logging
 from dataclasses import dataclass, field
 
@@ -21,6 +19,7 @@ from nautobot.apps.choices import SecretsGroupSecretTypeChoices
 from nautobot_ai_models.app_settings import DISABLE_ON_DEFINITION_CHANGE, NEW_TOOLS_ENABLED, app_setting
 from nautobot_ai_models.choices import MCPTransportChoices
 from nautobot_ai_models.constants import DEFAULT_TIMEOUT_SECONDS
+from nautobot_ai_models.integrations import canonical_digest, integration_timeout, render_field
 from nautobot_ai_models.models import MCPTool
 from nautobot_ai_models.secrets import read_secret
 from nautobot_ai_models.services.exceptions import MCPCallError, MCPConfigurationError
@@ -84,8 +83,8 @@ class ToolDefinition:
 class DiscoveryPolicy:
     """What a discovery pass may do to an operator's ``enabled`` column.
 
-    Resolved once in :func:`discover` and threaded down. ``remove_stale`` is not here: that is a
-    per-run choice, and these two are a standing decision.
+    :func:`discover` resolves this once and threads it down. ``remove_stale`` is not here,
+    because that is a per-run choice and these two are a standing decision.
     """
 
     new_tools_enabled: bool = True
@@ -176,11 +175,7 @@ def connection_for(server):
     else:
         verify = True
 
-    timeout = getattr(integration, "timeout", None)
-    if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout <= 0:
-        timeout = DEFAULT_TIMEOUT_SECONDS
-
-    return MCPConnection(url=url, headers=headers, verify=verify, timeout=timeout)
+    return MCPConnection(url=url, headers=headers, verify=verify, timeout=integration_timeout(integration))
 
 
 def discover(server, *, remove_stale=False, client=None, policy=None):
@@ -227,10 +222,10 @@ def discover(server, *, remove_stale=False, client=None, policy=None):
 def _cause(error, _depth=0):
     """Name the exception types that went wrong, not the wrapper that carried them.
 
-    The MCP client runs on anyio task groups, so a DNS failure reaches this module as
-    ``unhandled errors in a TaskGroup``. Only the type name is returned: an HTTP client's message
-    embeds the request URL, which an operator may have written a credential into, and it would
-    land in a JobLogEntry.
+    The MCP client runs on anyio task groups, so a DNS failure reaches this module as ``unhandled
+    errors in a TaskGroup``. This function returns the type name only. An HTTP client message
+    embeds the request URL, an operator may have written a credential into that URL, and the
+    message would land in a JobLogEntry.
 
     Args:
         error: The exception to unwrap.
@@ -311,11 +306,11 @@ def _reconcile(server, advertised, *, remove_stale, policy):
 def _upsert(server, advertised, existing, now, policy):
     """Create or refresh a row for each advertised tool.
 
-    ``existing`` is mutated as it goes, so a server advertising one name twice updates its own
-    first row instead of colliding on the unique constraint.
+    This function mutates ``existing`` as it goes, so a server that advertises one name twice
+    updates its own first row instead of a collision on the unique constraint.
 
     Args:
-        server: The MCPServer being discovered.
+        server: The MCPServer under discovery.
         advertised: The tools the server offered.
         existing: Tools already in the registry, keyed by name. Mutated.
         now: The timestamp for this pass.
@@ -349,9 +344,9 @@ def _upsert(server, advertised, existing, now, policy):
 def _create(server, definition, fingerprint, now, *, enabled):
     """Write a newly advertised tool.
 
-    ``writable`` stays at its model default of True: the tool is assumed to change something until
-    a person says otherwise. The server's ``readOnlyHint`` is recorded beside it and decides
-    nothing. ``enabled`` answers a different question, so the caller decides it.
+    ``writable`` stays at its model default of True. The tool changes something until a person
+    says otherwise. The server's ``readOnlyHint`` sits beside it and decides nothing. ``enabled``
+    answers a different question, so the caller decides it.
 
     Args:
         server: The MCPServer that advertised the tool.
@@ -382,12 +377,12 @@ def _create(server, definition, fingerprint, now, *, enabled):
 def _update(tool, definition, fingerprint, now, *, disable_on_change):
     """Refresh what the server says about an existing tool.
 
-    ``writable`` is never written here. ``enabled`` is written only when ``disable_on_change`` is
-    set and the fingerprint moved under a tool that was on and that discovery had seen before. The
-    row keeps its schemas, its description, and its review history.
+    This function never writes ``writable``. It writes ``enabled`` only when ``disable_on_change``
+    is set and the fingerprint moved under a tool that was on and that discovery had seen before.
+    The row keeps its schemas, its description, and its review history.
 
     A tool entered by hand carries no fingerprint and no ``last_seen_at``, so its first sight is a
-    first sight and not a change. Switching one off would undo a review that had just been done.
+    first sight and not a change. A switch-off there would undo a review somebody had just done.
 
     Args:
         tool: The row to refresh.
@@ -423,12 +418,12 @@ def _update(tool, definition, fingerprint, now, *, disable_on_change):
 def _retire(stale, *, remove_stale):
     """Deal with tools the server no longer advertises.
 
-    Disabling is the default, because it keeps the description, the schema, and the review.
-    ``last_seen_at`` is not touched: it is the evidence of when the tool went away.
+    A disable is the default, because it keeps the description, the schema, and the review. This
+    function does not touch ``last_seen_at``, which is the evidence of when the tool went away.
 
     Args:
         stale: The tools no longer advertised.
-        remove_stale: Delete them instead of disabling them.
+        remove_stale: Delete them instead of a disable.
 
     Returns:
         tuple: The tools disabled by this run, and the labels of those deleted.
@@ -449,9 +444,9 @@ def _retire(stale, *, remove_stale):
 def definition_fingerprint(definition):
     """Digest everything a server said about one tool.
 
-    The description is included as well as the schemas: it is half of what a reviewer read, and it
-    is the sentence a compromised server would rewrite while leaving the arguments alone. Keys are
-    sorted, so a serialisation order does not move the digest.
+    The digest covers the description as well as the schemas. The description is half of what a
+    reviewer read, and it is the sentence a compromised server would rewrite while it left the
+    arguments alone. The keys are sorted, so a serialisation order does not move the digest.
 
     Args:
         definition: What the server advertised.
@@ -459,24 +454,21 @@ def definition_fingerprint(definition):
     Returns:
         str: A hex SHA-256 digest.
     """
-    canonical = json.dumps(
+    return canonical_digest(
         {
             "title": definition.title or "",
             "description": definition.description or "",
             "input_schema": definition.input_schema or {},
             "output_schema": definition.output_schema or {},
-        },
-        sort_keys=True,
-        separators=(",", ":"),
+        }
     )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _rendered(integration, method_name, server):
     """Render one of the integration's Jinja2 fields.
 
-    All of remote URL, headers, and extra config support Jinja2, so the raw column would hand a
-    template string to httpx.
+    The remote URL, the headers, and the extra config all support Jinja2, so the raw column would
+    hand a template string to httpx.
 
     Args:
         integration: The ExternalIntegration to read.
@@ -489,19 +481,14 @@ def _rendered(integration, method_name, server):
     Raises:
         MCPConfigurationError: The template could not be rendered.
     """
-    try:
-        return getattr(integration, method_name)({"obj": server})
-    except Exception as error:  # pylint: disable=broad-except
-        raise MCPConfigurationError(
-            f"External integration '{integration}' has a template that does not render: {error}"
-        ) from error
+    return render_field(integration, method_name, server, MCPConfigurationError)
 
 
 def _attr(obj, *names, default=None):
     """Return the first of ``names`` the object has.
 
-    The MCP schema names its fields in camel case and the Python SDK in snake case, and which one
-    answers has moved between SDK releases.
+    The MCP schema names its fields in camel case and the Python SDK in snake case, and the answer
+    has moved between SDK releases.
 
     Args:
         obj: The object to read.
@@ -538,8 +525,8 @@ def _redirect_safe_client_class(base_class, protected_headers):
     """Build an HTTP client that drops the integration's headers on a cross-origin redirect.
 
     The session must follow a redirect, because ``/mcp`` to ``/mcp/`` is ordinary. An HTTP client
-    strips only ``Authorization`` when the origin changes, so a server answering
-    ``302 Location: https://elsewhere/`` would be handed an ``X-Api-Key`` verbatim.
+    strips ``Authorization`` only when the origin changes, so a server that answers
+    ``302 Location: https://elsewhere/`` would receive an ``X-Api-Key`` verbatim.
 
     Args:
         base_class: The client class to subclass.
@@ -547,7 +534,7 @@ def _redirect_safe_client_class(base_class, protected_headers):
 
     Returns:
         type | None: The subclass, or None when the library exposes no redirect hook. The caller
-            then refuses redirects, which fails loudly rather than leaking quietly.
+            then refuses redirects, which fails loudly instead of a quiet leak.
     """
     if not hasattr(base_class, "_redirect_headers"):
         return None
@@ -576,9 +563,9 @@ def _redirect_safe_client_class(base_class, protected_headers):
 class _StreamableHTTPClient:  # pylint: disable=too-few-public-methods
     """One MCP session per discovery pass, over HTTP and nothing else.
 
-    A session per pass rather than a pooled one: discovery runs from a Job that does not outlive
-    its run. The SDK is asynchronous and every caller here is not, so each pass is one
-    ``asyncio.run``, which is correct in a Celery worker and in a WSGI request.
+    Discovery runs from a Job that does not outlive its run, so one session per pass is enough.
+    The SDK is asynchronous and every caller here is not, so each pass is one ``asyncio.run``.
+    That is correct in a Celery worker and in a WSGI request.
     """
 
     def __init__(self, session_class, transport, http_client_class, timeout_class):
@@ -592,10 +579,10 @@ class _StreamableHTTPClient:  # pylint: disable=too-few-public-methods
         """Read what the server is and every tool it advertises, in one session.
 
         Args:
-        connection: Where and how to connect.
+            connection: Where and how to connect.
 
         Returns:
-        tuple: A ServerInfo and a tuple of ToolDefinition.
+            tuple: A ServerInfo and a tuple of ToolDefinition.
         """
         info, pages = self._run(connection, self._describe)
         definitions = []

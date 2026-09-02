@@ -43,3 +43,19 @@ class RegistryAPIPayloadsMixin:  # pylint: disable=too-few-public-methods
         cls.bulk_update_data = {
             "description": "Test Bulk Update Description",
         }
+
+
+class EmptyRegistryMixin:  # pylint: disable=too-few-public-methods
+    """Start each test with an empty Python tool registry, and leave one behind.
+
+    The registry is a module-level dict that lives for the life of the process, so a test that
+    registers a tool changes what every later test sees. Six suites needed the same two lines.
+    """
+
+    def setUp(self):  # pylint: disable=invalid-name
+        """Empty the registry now, and again when the test finishes."""
+        super().setUp()
+        from nautobot_ai_models import tools  # pylint: disable=import-outside-toplevel
+
+        self.addCleanup(tools.clear_registry)
+        tools.clear_registry()

@@ -1,0 +1,5 @@
+A new `checkpoint_retention_days` setting, defaulting to 30, and a **Prune Agent Threads** Job that applies it.
+
+The Job exists because LangGraph's checkpointer writes into tables Django does not manage. Nothing cascades into them, no foreign key reaches them, and every shipped saver raises `NotImplementedError` from `prune`. `services/checkpoints.py` holds the SQL, written once here rather than in each consuming app. A running thread and a thread waiting for a person are left alone whatever their age: a waiting thread has been waiting since somebody stopped looking at it, and deleting its state throws away the decision they were asked to make.
+
+A **Sync AI Tools** Job reconciles `AITool` with what `@register_ai_tool` declared in this process, under the same two policies that govern MCP tools. A tool that stops being registered is reported and left in place, never deleted.
