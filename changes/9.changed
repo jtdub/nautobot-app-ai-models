@@ -1,9 +1,3 @@
-`nautobot_ai_models.services.agents` builds a LangChain agent from these rows. It constructs and it stops: it opens no socket, writes no row and calls no model. Who runs the agent, with what checkpointer and under what timeout, and what is recorded afterwards, stay the consuming app's decisions.
-
-The builder is here rather than in each consuming app because the assembly reads `provider_type`, a rendered remote URL, a secrets group and a resolved parameter set, and every one of those is this app's to know. A second copy of that is the one that drifts. LangChain is therefore pinned in this app alone.
-
-`build_agent()` deliberately builds no MCP tool. It can reach an MCP server and does not: calling one needs an approval gate, the gate belongs to the consuming app, and a tool built here would hand a model a way around it. Read `mcp_bindings()` instead, pair each binding with your own gated caller, and pass the results back as `extra_tools`.
-
-`AITool` record writing moved out of the Sync AI Tools Job into `services/tool_records.py`, so the Job and the Git sync apply one policy rather than two copies of it. The Job now leaves a tool that a Git repository declared alone: the repository sync owns that record, and claiming it would rewrite the repository away.
-
-Registering the same function twice under one name now replaces it instead of raising, when the module and the qualified name match. A private import runs a module body twice and a repository is re-imported on every sync, so the old rule refused a tool for arriving the way the loader delivers it. Two *different* functions sharing a name are still refused.
+The app builds an agent and stops. It opens no socket, writes no row, and calls no model. Your own app runs it.
+The Sync AI Tools Job now leaves a tool that a Git repository supplied to the repository sync.
+A repository sync no longer fails when a tool registers again under the same name.

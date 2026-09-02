@@ -1,5 +1,3 @@
-No add view for a model nothing creates by hand. `AITool` offered an add page carrying two checkboxes and no name, and `AIAgentThread` offered one that raised `TypeError: 'NoneType' object is not callable` before it rendered, because the ViewSet has no form. Both ViewSets said so in a docstring and neither enforced it.
-
-Both are refused through a new `unsupported_actions` attribute that `AIModelsUIViewSetRouter` reads. `AITool` keeps its edit view, which is where a person turns a discovered tool on, and refuses only add, import and bulk rename; `AIAgentThread` refuses those and the edit views too. One mechanism rather than two, because `ObjectEditViewMixin` supplies create and update together and so cannot express "edit, no add". A refused action gets no route, and the list template draws a button only for a route that resolves, so the page and the button go together.
-
-`trim_thread` is gone. It issued `DELETE ... AND checkpoint_id <> %s` against all three checkpoint tables, and `checkpoint_blobs` has no `checkpoint_id` column: it is keyed `(thread_id, checkpoint_ns, channel, version)`, because a blob is shared by every checkpoint that did not change that channel. Against a real saver-created schema the call raised `ProgrammingError`. Its own tests missed it, because the fixture created all three tables in one invented shape; the fixture now uses the checkpointer's own DDL, and asserts the column is absent.
+Removed the AI Tool and AI Agent Thread add pages. Neither model is created by hand, and the thread page raised an error.
+Kept the AI Tool edit page, which is where you turn a discovered tool on.
+Removed `trim_thread`. It raised a database error against a real checkpointer schema, so no deployment could trim a thread.

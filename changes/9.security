@@ -1,11 +1,3 @@
-The registry stores a tool's name. It never stores a Python import path, and nothing imports a module that a database row named. A registered tool is declared in code, the way Nautobot declares Jobs and Secret providers, and `AITool.clean()` refuses a row of kind `registered` whose name nothing registered.
-
-`new_tools_enabled` now governs `AITool` as well, so a newly discovered Python tool arrives disabled in a deployment that has set it, exactly as a newly discovered MCP tool does.
-
-Every question an approval gate asks resolves through `AIAgentTool`, whichever source the tool came from: `writable` reads through to the bound tool rather than being stored twice, and `fingerprint` returns the definition digest of that tool. A property raises rather than guessing, so no tool source can arrive without an answer.
-
-A Job tool now checks what `JobResult.enqueue_job` does not. That primitive performs no `extras.run_job` permission check, no `Job.enabled` check and no approval-workflow handling: all three live in Nautobot's own run view, which this path does not go through. So a bound Job tool would have started any Job, disabled or awaiting approval, for a user with no permission to run it — and a model decides when to call a tool, on text somebody else may have written. The tool now refuses a Job that is disabled or not installed, a user without `extras.run_job` on it, a Job taking sensitive variables and a Job with an approval workflow, re-checked on every call rather than at build time. `AITool.job` can no longer be repointed on an existing record.
-
-`AIAgentTool.fingerprint` is now computed over what the binding actually offers — the wire name, the wire description and the argument schema — instead of read off the target's stored digest. The old value missed both halves of the question an approval gate asks: `name_override` and `description_override` are what the model is told and are not in the target's digest, and a `job` tool has no stored digest at all, so the comparison was `"" == ""` forever.
-
-Rule G5 now holds across the whole tool list. Wire names were unique within the tool bindings only, so two specialists carrying one `tool_name` — which `(parent, subagent)` uniqueness permits — or a `load_skill` colliding with a bound tool would hand a model two tools of one name.
+A Job tool now checks the `extras.run_job` permission, the enabled flag, and the approval workflow on every call. It checked none of them before.
+`new_tools_enabled` now governs AI Tools too. A newly found Python tool arrives switched off where you set it.
+An AI Tool record stores a name, never a Python import path. Nothing imports a module that a database row named.
