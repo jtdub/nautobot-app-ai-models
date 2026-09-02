@@ -1,3 +1,0 @@
-Added a `checkpoint_retention_days` setting, which defaults to 30 days.
-Added a Prune Agent Threads Job. Nothing else deletes the conversation state an agent leaves behind.
-Added a Sync AI Tools Job. It reports a tool that is no longer registered, and never deletes the record.

@@ -1,3 +1,0 @@
-A Job tool now checks the `extras.run_job` permission, the enabled flag, and the approval workflow on every call. It checked none of them before.
-`new_tools_enabled` now governs AI Tools too. A newly found Python tool arrives switched off where you set it.
-An AI Tool record stores a name, never a Python import path. Nothing imports a module that a database row named.
