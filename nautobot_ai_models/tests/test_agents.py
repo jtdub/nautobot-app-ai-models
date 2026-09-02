@@ -64,7 +64,7 @@ class BuildingRunsNothingTest(TestCase):
         at_run_time = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == allowed:
-                at_run_time = {inner for inner in ast.walk(node)}
+                at_run_time = set(ast.walk(node))
 
         offenders = [
             f"line {node.lineno} calls .{node.func.attr}()"
@@ -314,7 +314,7 @@ class JobRefusalTest(TestCase):
         scheduled.pk = uuid.uuid4()
 
         with mock.patch("nautobot.extras.models.ScheduledJob.create_schedule", return_value=scheduled):
-            answer = agents._start_or_submit(self.job, self.permitted)  # pylint: disable=protected-access
+            answer = agents._start_or_submit(self.job, self.permitted, {})  # pylint: disable=protected-access
 
         self.assertIn("approve", answer)
         scheduled.delete.assert_not_called()
@@ -327,11 +327,11 @@ class JobRefusalTest(TestCase):
 
         with mock.patch("nautobot.extras.models.ScheduledJob.create_schedule", return_value=scheduled):
             with mock.patch("nautobot.extras.models.JobResult.enqueue_job", return_value=job_result) as enqueued:
-                answer = agents._start_or_submit(self.job, self.permitted)  # pylint: disable=protected-access
+                answer = agents._start_or_submit(self.job, self.permitted, {})  # pylint: disable=protected-access
 
         self.assertIn("Started", answer)
         scheduled.delete.assert_called_once()
-        enqueued.assert_called_once_with(self.job, self.permitted)
+        enqueued.assert_called_once_with(self.job, self.permitted, job_kwargs={})
 
 
 class UniqueToolNameTest(TestCase):
