@@ -90,6 +90,11 @@ def import_tools(repository, *, ignore_import_errors=True):
     deleted stays registered for the life of the process, and nothing ever reports its record as
     missing.
 
+    A repository that does not provide AI tools returns early and unloads nothing, because this
+    function cannot tell it from a repository that never was ours. A slug that collides with an
+    installed app's module prefix would otherwise de-register that app's tools. `refresh_ai_tools`
+    does that unload instead, and only when records prove the repository was ours.
+
     Args:
         repository: The GitRepository record.
         ignore_import_errors: Log an import failure instead of raising it.

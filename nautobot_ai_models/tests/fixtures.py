@@ -391,3 +391,21 @@ def create_aiagentthread(**kwargs):
             **kwargs,
         ),
     ]
+
+
+def age_agent_threads(days=365):
+    """Move every thread's timestamps back, so the retention window has passed.
+
+    `expired_threads` measures from `finished_at` and falls back to `started_at`, so both columns
+    have to move. A thread that never finished keeps its empty `finished_at`.
+
+    Args:
+        days: How far back to move the timestamps.
+
+    Returns:
+        datetime: The timestamp written.
+    """
+    old = timezone.now() - timezone.timedelta(days=days)
+    AIAgentThread.objects.update(started_at=old)
+    AIAgentThread.objects.filter(finished_at__isnull=False).update(finished_at=old)
+    return old

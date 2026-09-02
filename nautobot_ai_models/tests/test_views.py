@@ -16,6 +16,26 @@ from nautobot_ai_models.choices import (
 from nautobot_ai_models.tests import fixtures
 
 
+def spare_agent(name):
+    """Create an agent with no bindings, for a form payload that must not collide.
+
+    Every pair the fixtures make is already taken, and each binding model allows one row per pair.
+    A fresh agent leaves every pair free and can take part in no cycle.
+
+    Args:
+        name: The agent's name.
+
+    Returns:
+        AIAgent: The saved agent.
+    """
+    return models.AIAgent.objects.create(
+        name=name,
+        description=f"{name}. Give it a hostname.",
+        system_prompt="You answer from tools only.",
+        model=models.AIModel.objects.filter(kind=AIModelKindChoices.CHAT).first(),
+    )
+
+
 class AIProviderViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
     # pylint: disable=too-many-ancestors
     """Test the AIProvider views."""
@@ -144,6 +164,7 @@ class AIToolViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
     model = models.AITool
     bulk_edit_data = {"enabled": True}
 
+    test_create_object_as_superuser = None
     test_create_object_with_permission = None
     test_create_object_without_permission = None
     test_create_object_with_constrained_permission = None
@@ -202,8 +223,8 @@ class AIAgentToolViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
     def setUpTestData(cls):
         """Create test data and the form payloads the generic view tests post."""
         fixtures.create_aiagenttool()
-        agent = models.AIAgent.objects.get(name="Test Inventory Specialist")
-        tools = list(models.AITool.objects.order_by("name"))
+        agent = spare_agent("View Test Tool Agent")
+        tools = list(models.AITool.objects.filter(enabled=True).order_by("name"))
         cls.form_data = {
             "agent": agent.pk,
             "ai_tool": tools[0].pk,
@@ -231,9 +252,9 @@ class AIAgentSubagentViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
     def setUpTestData(cls):
         """Create test data and the form payloads the generic view tests post."""
         fixtures.create_aiagentsubagent()
-        supervisor = models.AIAgent.objects.get(name="Test Skills Agent")
-        specialist = models.AIAgent.objects.get(name="Test Inventory Specialist")
-        other = models.AIAgent.objects.get(name="Test Supervisor")
+        supervisor = spare_agent("View Test Supervisor")
+        specialist = spare_agent("View Test Specialist One")
+        other = spare_agent("View Test Specialist Two")
         cls.form_data = {
             "parent": supervisor.pk,
             "subagent": specialist.pk,
@@ -288,8 +309,8 @@ class AIAgentSkillViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
     def setUpTestData(cls):
         """Create test data and the form payloads the generic view tests post."""
         fixtures.create_aiagentskill()
-        agent = models.AIAgent.objects.get(name="Test Supervisor")
-        skills = list(models.AISkill.objects.order_by("name"))
+        agent = spare_agent("View Test Skill Agent")
+        skills = list(models.AISkill.objects.filter(enabled=True).order_by("name"))
         cls.form_data = {"agent": agent.pk, "skill": skills[0].pk, "weight": 100}
         cls.update_data = {"agent": agent.pk, "skill": skills[1].pk, "weight": 150}
 

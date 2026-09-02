@@ -7,7 +7,6 @@ argument schema from, and a body would prove nothing.
 
 from unittest import mock
 
-from django.utils import timezone
 from nautobot.apps.testing import TransactionTestCase, get_job_class_and_model
 from nautobot.extras.models import Job, JobLogEntry
 
@@ -465,7 +464,7 @@ class PruneAgentThreadsTest(TransactionTestCase):
 
     def test_a_dry_run_deletes_nothing(self):
         """Reporting what would go is not deleting it."""
-        AIAgentThread.objects.update(started_at=timezone.now() - timezone.timedelta(days=365))
+        fixtures.age_agent_threads()
         before = AIAgentThread.objects.count()
 
         run_job(self.job_model, days=1, delete_rows=True, dry_run=True)
@@ -474,7 +473,7 @@ class PruneAgentThreadsTest(TransactionTestCase):
 
     def test_a_finished_thread_past_the_window_goes(self):
         """The one case that prunes."""
-        AIAgentThread.objects.update(started_at=timezone.now() - timezone.timedelta(days=365))
+        fixtures.age_agent_threads()
         expected = AIAgentThread.objects.filter(
             status__in=(AIAgentThreadStatusChoices.COMPLETED, AIAgentThreadStatusChoices.FAILED)
         ).count()
@@ -486,7 +485,7 @@ class PruneAgentThreadsTest(TransactionTestCase):
 
     def test_a_waiting_thread_is_left_alone(self):
         """Deleting its state throws away a decision somebody was asked to make."""
-        AIAgentThread.objects.update(started_at=timezone.now() - timezone.timedelta(days=365))
+        fixtures.age_agent_threads()
 
         run_job(self.job_model, days=1, delete_rows=True, dry_run=False)
 

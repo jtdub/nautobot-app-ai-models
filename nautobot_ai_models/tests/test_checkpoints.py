@@ -6,7 +6,6 @@ is also why these tests are worth having: nothing else in the app knows those ta
 """
 
 from django.db import connection
-from django.utils import timezone
 from nautobot.apps.testing import TestCase
 
 from nautobot_ai_models.choices import AIAgentThreadStatusChoices
@@ -175,8 +174,7 @@ class RetentionTest(TestCase):
 
     def test_a_live_thread_is_never_expired(self):
         """However old it is. Something may still be running against it."""
-        old = timezone.now() - timezone.timedelta(days=365)
-        AIAgentThread.objects.update(started_at=old)
+        fixtures.age_agent_threads()
 
         expired = checkpoints.expired_threads(days=1)
 
@@ -185,8 +183,7 @@ class RetentionTest(TestCase):
 
     def test_a_waiting_thread_is_never_expired(self):
         """It has been waiting since somebody stopped looking at it, and the decision is still owed."""
-        old = timezone.now() - timezone.timedelta(days=365)
-        AIAgentThread.objects.update(started_at=old)
+        fixtures.age_agent_threads()
 
         expired = checkpoints.expired_threads(days=1)
 
@@ -199,8 +196,7 @@ class RetentionTest(TestCase):
 
     def test_a_finished_thread_past_the_window_expires(self):
         """The one case that prunes."""
-        old = timezone.now() - timezone.timedelta(days=365)
-        AIAgentThread.objects.update(started_at=old)
+        fixtures.age_agent_threads()
 
         expired = checkpoints.expired_threads(days=1)
 
@@ -210,8 +206,7 @@ class RetentionTest(TestCase):
 
     def test_pruning_can_keep_the_record_and_drop_the_state(self):
         """A deployment that reports on agent activity wants the row and not the checkpoints."""
-        old = timezone.now() - timezone.timedelta(days=365)
-        AIAgentThread.objects.update(started_at=old)
+        fixtures.age_agent_threads()
         before = AIAgentThread.objects.count()
 
         result = checkpoints.prune(days=1, delete_rows=False)
@@ -221,8 +216,7 @@ class RetentionTest(TestCase):
 
     def test_pruning_can_delete_the_record_too(self):
         """The default, for a deployment that wants the space back."""
-        old = timezone.now() - timezone.timedelta(days=365)
-        AIAgentThread.objects.update(started_at=old)
+        fixtures.age_agent_threads()
         expected = checkpoints.expired_threads(days=1).count()
         before = AIAgentThread.objects.count()
 

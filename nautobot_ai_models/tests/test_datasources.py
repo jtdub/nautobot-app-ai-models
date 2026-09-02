@@ -178,14 +178,18 @@ class ImportTest(GitToolsTestCase):  # pylint: disable=too-many-ancestors
         self.assertEqual(sorted(found), ["repo_read_tool"])
         self.assertIsNone(tools.get_registered_tool("repo_write_tool"))
 
-    def test_an_unticked_repository_unloads_and_stops(self):
-        """What a repository that stopped providing tools gets: the unload, and no import."""
+    def test_an_unticked_repository_stops_and_unloads_nothing(self):
+        """This function cannot tell an unticked repository from one that never was ours.
+
+        A slug that collides with an installed app's module prefix would otherwise de-register
+        that app's tools. `refresh_ai_tools` owns the unload, and `RefreshTest` covers it.
+        """
         self.write_repository()
         datasources.import_tools(self.repository, ignore_import_errors=False)
         self.repository.provided_contents = []
 
         self.assertEqual(datasources.import_tools(self.repository), {})
-        self.assertEqual(tools.registered_tools(), {})
+        self.assertEqual(sorted(tools.registered_tools()), ["repo_read_tool", "repo_write_tool"])
 
     def test_a_missing_module_is_refused_by_name(self):
         """A repository that ticked the box and shipped no module is a mistake worth a message."""
@@ -283,8 +287,12 @@ class RefreshTest(GitToolsTestCase):  # pylint: disable=too-many-ancestors
         self.assertTrue(AITool.objects.filter(name="repo_write_tool").exists())
         self.assertIn("repo_write_tool is no longer registered", self.messages(recorder))
 
-    def test_unticking_the_content_disables_the_records(self):
-        """The tools stop being offered. The records stay, because an agent may be bound to one."""
+    def test_unticking_the_content_disables_the_records_and_unloads(self):
+        """The tools stop being offered. The records stay, because an agent may be bound to one.
+
+        This callback owns the unload for an unticked repository, because its records prove the
+        repository was ours. `import_tools` cannot know that, so it unloads nothing.
+        """
         self.write_repository()
         self.sync()
         self.repository.provided_contents = []
@@ -294,6 +302,7 @@ class RefreshTest(GitToolsTestCase):  # pylint: disable=too-many-ancestors
 
         self.assertEqual(AITool.objects.filter(kind=AIToolKindChoices.GIT, enabled=True).count(), 0)
         self.assertEqual(AITool.objects.filter(kind=AIToolKindChoices.GIT).count(), 2)
+        self.assertEqual(tools.registered_tools(), {})
         self.assertIn("no longer provides AI tools", self.messages(recorder))
 
     def test_a_deletion_says_the_records_go_too(self):

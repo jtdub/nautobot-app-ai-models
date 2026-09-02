@@ -24,6 +24,25 @@ from nautobot_ai_models.tests import fixtures
 SERVICE_PATH = Path(agents.__file__)
 
 
+def own_body_nodes(node):
+    """Yield every node under `node` that is not inside a function nested in it.
+
+    `ast.walk` descends into a nested function, so it credits an inner call to the outer function
+    as well. This does not.
+
+    Args:
+        node: The AST node to read.
+
+    Yields:
+        The nodes in this node's own body.
+    """
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        yield child
+        yield from own_body_nodes(child)
+
+
 class BuildingRunsNothingTest(TestCase):
     """Rule G1: `build_agent()` opens no socket, writes no row and calls no model."""
 
@@ -80,14 +99,15 @@ class BuildingRunsNothingTest(TestCase):
     def test_the_one_writing_function_is_only_reached_when_a_tool_is_called(self):
         """`_start_or_submit` is what the guard above excuses, so where it is called from matters."""
         tree = ast.parse(SERVICE_PATH.read_text(encoding="utf-8"), filename=str(SERVICE_PATH))
-        callers = []
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.FunctionDef):
-                continue
-            for inner in ast.walk(node):
-                if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name):
-                    if inner.func.id == "_start_or_submit":
-                        callers.append(node.name)
+        callers = [
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and any(
+                isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name) and inner.func.id == "_start_or_submit"
+                for inner in own_body_nodes(node)
+            )
+        ]
 
         self.assertEqual(callers, ["start_job"], "Only the Job tool's own body may reach it.")
 
