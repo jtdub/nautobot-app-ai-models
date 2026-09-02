@@ -51,50 +51,6 @@ Set the `kind` of each embedding model.
 
 <!-- towncrier release notes start -->
 
-## [v1.1.0 (2026-09-02)](https://github.com/jtdub/nautobot-app-ai-models/releases/tag/v1.1.0)
-
-### Security
-
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - A Job tool now checks the `extras.run_job` permission, the enabled flag, and the approval workflow on every call. It checked none of them before.
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - `new_tools_enabled` now governs AI Tools too. A newly found Python tool arrives switched off where you set it.
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - An AI Tool record stores a name, never a Python import path. Nothing imports a module that a database row named.
-
-### Added
-
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - Added an Agents section under AI Tools, where you build an agent from a model, a system prompt, and the tools it may call.
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - Added AI Tools from Git repositories. A repository supplies tools the same way it supplies Jobs.
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - Added a Nautobot Job as a tool. An agent starts the Job and reports the Job Result at once. It never waits.
-
-### Changed
-
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - The app builds an agent and stops. It opens no socket, writes no row, and calls no model. Your own app runs it.
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - The Sync AI Tools Job now leaves a tool that a Git repository supplied to the repository sync.
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - A repository sync no longer fails when a tool registers again under the same name.
-
-### Fixed
-
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - Removed the AI Tool and AI Agent Thread add pages. Neither model is created by hand, and the thread page raised an error.
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - Kept the AI Tool edit page, which is where you turn a discovered tool on.
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - Removed `trim_thread`. It raised a database error against a real checkpointer schema, so no deployment could trim a thread.
-
-### Dependencies
-
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - Added the `agents` extra: langchain, langgraph, and the three provider packages. A deployment that only catalogs models installs none of it.
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - Added a separate `checkpointer` extra. It is absent from `agents` and from `all` on purpose.
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - WARNING: `checkpointer` installs psycopg 3. That changes the database driver of the deployment and deadlocks change logging. Read the AI Agent Thread page first.
-
-### Documentation
-
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - Added seven model pages under Data Models.
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - Added a user guide for Git-sourced tools: the repository layout, the required root `__init__.py`, and what each sync does to a record.
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - Corrected the group-weight table in the app extension guide. A sibling app now takes weight 400 or higher.
-
-### Housekeeping
-
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - Added a `checkpoint_retention_days` setting, which defaults to 30 days.
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - Added a Prune Agent Threads Job. Nothing else deletes the conversation state an agent leaves behind.
-- [#9](https://github.com/jtdub/nautobot-app-ai-models/issues/9) - Added a Sync AI Tools Job. It reports a tool that is no longer registered, and never deletes the record.
-
 ## [v1.1.0 (2026-08-27)](https://github.com/jtdub/nautobot-app-ai-models/releases/tag/v1.1.0)
 
 ### Added

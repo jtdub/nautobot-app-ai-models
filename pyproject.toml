@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nautobot-ai-models"
-version = "1.1.0"
+version = "1.2.0"
 description = "Nautobot app that catalogs LLM providers, LLM models, MCP servers, and MCP tools."
 authors = ["James Williams <james.williams@jtdub.com>"]
 license = "Apache-2.0"
@@ -225,7 +225,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.towncrier]
 package = "nautobot_ai_models"
 directory = "changes"
-filename = "docs/admin/release_notes/version_1.1.md"
+filename = "docs/admin/release_notes/version_1.2.md"
 template = "development/towncrier_template.j2"
 start_string = "<!-- towncrier release notes start -->"
 # GitHub redirects /issues/N to /pull/N when N is a pull request, so one format serves both.
