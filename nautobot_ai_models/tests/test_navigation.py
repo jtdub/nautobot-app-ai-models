@@ -13,6 +13,7 @@ from nautobot.apps.testing import TestCase
 
 from nautobot_ai_models import navigation
 from nautobot_ai_models.constants import (
+    AGENTS_GROUP_WEIGHT,
     AI_MODELS_GROUP_WEIGHT,
     AI_TOOLS_TAB_ICON,
     AI_TOOLS_TAB_NAME,
@@ -70,12 +71,26 @@ class AIToolsNavigationTest(TestCase):
         return [item.link for item in items]
 
     def test_tab_holds_one_group_per_registry(self):
-        """Both registries hang off the one shared tab, each with its own weight."""
+        """Every registry hangs off the one shared tab, each with its own weight."""
         groups = self.groups()
-        self.assertEqual(sorted(groups), ["AI Models", "MCP Models"])
+        self.assertEqual(sorted(groups), ["AI Models", "Agents", "MCP Models"])
         self.assertEqual(groups["AI Models"].weight, AI_MODELS_GROUP_WEIGHT)
         self.assertEqual(groups["MCP Models"].weight, MCP_MODELS_GROUP_WEIGHT)
+        self.assertEqual(groups["Agents"].weight, AGENTS_GROUP_WEIGHT)
         self.assertLess(AI_MODELS_GROUP_WEIGHT, MCP_MODELS_GROUP_WEIGHT)
+        self.assertLess(MCP_MODELS_GROUP_WEIGHT, AGENTS_GROUP_WEIGHT)
+
+    def test_a_sibling_app_has_a_band_left_to_claim(self):
+        """`docs/dev/extending.md` tells another app to take 400 or higher. Leave that true."""
+        self.assertLess(AGENTS_GROUP_WEIGHT, 400)
+
+    def test_agents_group_holds_the_four_operator_pages(self):
+        """The three binding models are reached from an agent's page, not from the menu."""
+        links = self.links_of(self.groups()["Agents"])
+        for view in ("aiagent_list", "aitool_list", "aiskill_list", "aiagentthread_list"):
+            self.assertIn(reverse(f"plugins:nautobot_ai_models:{view}"), links)
+        for view in ("aiagenttool_list", "aiagentsubagent_list", "aiagentskill_list"):
+            self.assertNotIn(reverse(f"plugins:nautobot_ai_models:{view}"), links)
 
     def test_ai_models_group_holds_both_models(self):
         """The AI Models group lists the provider and the model."""

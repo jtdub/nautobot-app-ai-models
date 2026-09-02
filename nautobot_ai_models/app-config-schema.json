@@ -11,6 +11,12 @@
         "disable_on_definition_change": {
             "type": "boolean",
             "default": false
+        },
+        "checkpoint_retention_days": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 30,
+            "description": "How many days a finished agent thread's LangGraph checkpoints are kept. Those tables are the checkpointer's own and nothing cascades into them, so this is the only thing that removes them."
         }
     },
     "additionalProperties": false

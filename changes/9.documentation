@@ -1,0 +1,3 @@
+Added seven model pages under Data Models.
+Added a user guide for Git-sourced tools: the repository layout, the required root `__init__.py`, and what each sync does to a record.
+Corrected the group-weight table in the app extension guide. A sibling app now takes weight 400 or higher.

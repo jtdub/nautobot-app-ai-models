@@ -1,0 +1,3 @@
+Added the `agents` extra: langchain, langgraph, and the three provider packages. A deployment that only catalogs models installs none of it.
+Added a separate `checkpointer` extra. It is absent from `agents` and from `all` on purpose.
+WARNING: `checkpointer` installs psycopg 3. That changes the database driver of the deployment and deadlocks change logging. Read the AI Agent Thread page first.

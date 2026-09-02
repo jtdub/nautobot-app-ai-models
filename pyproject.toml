@@ -42,6 +42,33 @@ mcp = { version = ">=2.0.0,<3.0.0", optional = true }
 # Imported directly by services/mcp.py to build the session's HTTP client, so it is declared
 # here rather than relied on as one of mcp's own dependencies.
 httpx2 = { version = "*", optional = true }
+# LangChain and LangGraph, for `services/agents.py`. Optional for the reason `mcp` is: `models.py`
+# imports none of it, so a deployment that only catalogs models installs none of it. The three
+# provider packages are separate distributions rather than extras of `langchain`, so all three are
+# named; `chat_model_for` imports one of them, lazily, by the provider's recorded dialect.
+langchain = { version = ">=1.3.0,<2.0.0", optional = true }
+langgraph = { version = ">=1.2.0,<2.0.0", optional = true }
+langchain-ollama = { version = ">=1.1.0,<2.0.0", optional = true }
+langchain-openai = { version = ">=1.0.0,<2.0.0", optional = true }
+langchain-anthropic = { version = ">=1.0.0,<2.0.0", optional = true }
+# The Postgres checkpointer. It creates and owns its own tables, outside Django's migrations, which
+# is why `services/checkpoints.py` deletes from them with hand-written SQL.
+#
+# WARNING: this is an extra of its own, and it is NOT in `agents` or in `all`. It hard-depends on
+# psycopg 3, and Django prefers psycopg 3 over psycopg2 whenever it can import it - so installing
+# it changes the database driver of the whole Nautobot deployment. Under that driver Nautobot's own
+# change logging deadlocks, because the JSON adapter iterates a queryset on a cursor that is
+# already mid-execute. Leaving the package out of `agents` is not enough on its own: pip resolves
+# the dependency transitively, so the separation has to be an extra a deployment opts into
+# knowingly, having read `docs/models/aiagentthread.md`.
+#
+# Nothing in this app needs it. `services/checkpoints.py` retention runs on Django's own
+# connection, so the Prune Agent Threads Job works either way.
+langgraph-checkpoint-postgres = { version = ">=3.1.0,<4.0.0", optional = true }
+# Turns an MCP tool into a LangChain tool. Declared here rather than relied on as one of
+# langchain's own dependencies, which is what this file already does for httpx2. Still pre-1.0, so
+# the ceiling is the next minor rather than the next major.
+langchain-mcp-adapters = { version = ">=0.3.0,<0.4.0", optional = true }
 
 [tool.poetry.group.dev.dependencies]
 coverage = "*"
@@ -80,9 +107,26 @@ mkdocs-glightbox = "~0.5.2"
 
 [tool.poetry.extras]
 discovery = ["mcp", "httpx2"]
+agents = [
+    "langchain",
+    "langgraph",
+    "langchain-ollama",
+    "langchain-openai",
+    "langchain-anthropic",
+    "langchain-mcp-adapters",
+]
+# See the WARNING beside the dependency: this one changes the deployment's database driver, so it
+# is opted into on its own and is deliberately absent from `agents` and from `all`.
+checkpointer = ["langgraph-checkpoint-postgres"]
 all = [
     "mcp",
     "httpx2",
+    "langchain",
+    "langgraph",
+    "langchain-ollama",
+    "langchain-openai",
+    "langchain-anthropic",
+    "langchain-mcp-adapters",
 ]
 
 [tool.pylint.main]
@@ -93,6 +137,11 @@ ignore = ".venv"
 [tool.pylint.basic]
 # No docstrings required for private methods (Pylint default), or for test_ functions, or for inner Meta classes.
 no-docstring-rgx = "^(_|test_|Meta$)"
+
+[tool.pylint.format]
+# `models.py` carries eleven models and their reasoning. Splitting it to satisfy a line
+# count would put one registry in two files for no reader's benefit.
+max-module-lines = 1600
 
 [tool.pylint.messages_control]
 disable = """,

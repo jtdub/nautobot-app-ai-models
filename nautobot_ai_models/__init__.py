@@ -23,9 +23,10 @@ class AIModelsConfig(NautobotAppConfig):
     default_settings = {
         "new_tools_enabled": True,
         "disable_on_definition_change": False,
+        "checkpoint_retention_days": 30,
     }
     docs_view_name = "plugins:nautobot_ai_models:docs"
-    searchable_models = ["aiprovider", "aimodel", "mcpserver", "mcptool"]
+    searchable_models = ["aiprovider", "aimodel", "mcpserver", "mcptool", "aiagent", "aitool", "aiskill"]
 
     nautobot_edition = "community"
 

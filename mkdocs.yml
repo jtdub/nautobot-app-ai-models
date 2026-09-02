@@ -110,6 +110,7 @@ nav:
       - App Overview: "user/app_overview.md"
       - Getting Started: "user/app_getting_started.md"
       - Using the App: "user/app_use_cases.md"
+      - Tools from a Git Repository: "user/git_tools.md"
       - Frequently Asked Questions: "user/faq.md"
       - External Interactions: "user/external_interactions.md"
       - Data Models:
@@ -117,6 +118,13 @@ nav:
           - AI Model: "models/aimodel.md"
           - MCP Server: "models/mcpserver.md"
           - MCP Tool: "models/mcptool.md"
+          - AI Agent: "models/aiagent.md"
+          - AI Tool: "models/aitool.md"
+          - AI Skill: "models/aiskill.md"
+          - AI Agent Tool: "models/aiagenttool.md"
+          - AI Agent Subagent: "models/aiagentsubagent.md"
+          - AI Agent Skill: "models/aiagentskill.md"
+          - AI Agent Thread: "models/aiagentthread.md"
   - Administrator Guide:
       - Install and Configure: "admin/install.md"
       - Upgrade: "admin/upgrade.md"

@@ -1,0 +1,3 @@
+Removed the AI Tool and AI Agent Thread add pages. Neither model is created by hand, and the thread page raised an error.
+Kept the AI Tool edit page, which is where you turn a discovered tool on.
+Removed `trim_thread`. It raised a database error against a real checkpointer schema, so no deployment could trim a thread.

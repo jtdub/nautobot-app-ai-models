@@ -1,0 +1,3 @@
+Added an Agents section under AI Tools, where you build an agent from a model, a system prompt, and the tools it may call.
+Added AI Tools from Git repositories. A repository supplies tools the same way it supplies Jobs.
+Added a Nautobot Job as a tool. An agent starts the Job and reports the Job Result at once. It never waits.
