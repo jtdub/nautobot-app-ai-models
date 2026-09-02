@@ -3,7 +3,13 @@
 The tables this module deletes from are LangGraph's own. Django does not migrate them, so
 these tests create them and drop them, in the shape `langgraph-checkpoint-postgres` uses. That
 is also why these tests are worth having: nothing else in the app knows those tables exist.
+
+`CheckpointTablesTest` runs on PostgreSQL only. Its DDL is the saver's own, and the saver is
+PostgreSQL-only, so no other backend can hold these tables. Every other case here runs
+everywhere, and on MySQL they prove the quiet path: no tables, so nothing to delete.
 """
+
+import unittest
 
 from django.db import connection
 from nautobot.apps.testing import TestCase
@@ -59,6 +65,7 @@ class NoCheckpointTablesTest(TestCase):
         self.assertEqual(checkpoints.delete_thread("a-thread"), {})
 
 
+@unittest.skipUnless(connection.vendor == "postgresql", "The saver that creates these tables is PostgreSQL-only.")
 class CheckpointTablesTest(TestCase):
     """Deleting from the tables the saver creates."""
 

@@ -37,18 +37,16 @@ def _existing_tables():
     """Which checkpoint tables this database has.
 
     A deployment that never ran an agent has none of them, and a `DELETE` against a missing table
-    is an error rather than a no-op.
+    is an error rather than a no-op. Django's introspection answers this on every backend, where a
+    hand-written `information_schema` query answers it on PostgreSQL alone.
+
+    A MySQL deployment never has them, because the saver that creates them is PostgreSQL-only. It
+    gets an empty tuple, and every caller then does nothing.
 
     Returns:
         tuple: The names from `CHECKPOINT_TABLES` that exist.
     """
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = current_schema() AND table_name = ANY(%s)",
-            [list(CHECKPOINT_TABLES)],
-        )
-        found = {row[0] for row in cursor.fetchall()}
+    found = set(connection.introspection.table_names())
     return tuple(name for name in CHECKPOINT_TABLES if name in found)
 
 
@@ -59,8 +57,8 @@ def delete_thread(thread_id, *, tables=None):
     connection string, and not the `agents` extra. A retention Job must not have to build a client
     to delete a row.
 
-    The statement interpolates a table name from `CHECKPOINT_TABLES` only. No caller value ever
-    reaches the statement text.
+    The statement interpolates a table name from `CHECKPOINT_TABLES` only, quoted by the backend's
+    own `quote_name`. No caller value ever reaches the statement text.
 
     Args:
         thread_id: The LangGraph thread_id, as a string or UUID.
@@ -74,7 +72,8 @@ def delete_thread(thread_id, *, tables=None):
     deleted = {}
     with connection.cursor() as cursor:
         for table in _existing_tables() if tables is None else tables:
-            cursor.execute(f'DELETE FROM "{table}" WHERE {THREAD_COLUMN} = %s', [str(thread_id)])  # noqa: S608
+            name = connection.ops.quote_name(table)
+            cursor.execute(f"DELETE FROM {name} WHERE {THREAD_COLUMN} = %s", [str(thread_id)])  # noqa: S608
             deleted[table] = cursor.rowcount
     logger.debug("Deleted checkpoints for thread %s: %s", thread_id, deleted)
     return deleted
