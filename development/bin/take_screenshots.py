@@ -43,6 +43,7 @@ LIST_VIEWS = (
     ("ai-models-list", "/plugins/ai-models/ai-models/"),
     ("mcp-servers-list", "/plugins/ai-models/mcp-servers/"),
     ("mcp-tools-list", "/plugins/ai-models/mcp-tools/"),
+    ("ai-agents-list", "/plugins/ai-models/ai-agents/"),
 )
 """List views to capture whole. Each entry is a name and the path to visit."""
 
@@ -51,6 +52,7 @@ DETAIL_VIEWS = (
     ("ai-model-detail", "/plugins/ai-models/ai-models/", "gpt-4o-mini"),
     ("mcp-server-detail", "/plugins/ai-models/mcp-servers/", "Nautobot MCP"),
     ("mcp-tool-detail", "/plugins/ai-models/mcp-tools/", "get_device"),
+    ("ai-agent-detail", "/plugins/ai-models/ai-agents/", "Network Operations Assistant"),
 )
 """Detail views to capture. Each entry is a name, a list path, and the search term that picks the row."""
 
