@@ -76,4 +76,6 @@ Give each app a different group weight. The groups then keep a stable order.
 | Group | Weight | App |
 |---|---|---|
 | AI Models | 100 | `nautobot-ai-models` |
-| (reserved for future apps) | 200 and up | |
+| MCP Models | 200 | `nautobot-ai-models` |
+| Agents | 300 | `nautobot-ai-models` |
+| (reserved for other apps) | 400 and up | |

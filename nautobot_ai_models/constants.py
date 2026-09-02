@@ -100,3 +100,90 @@ AI_TOOLS_TAB_ICON = "nautobot_ai_models/icons/stars.svg"
 
 AI_MODELS_GROUP_WEIGHT = 100
 MCP_MODELS_GROUP_WEIGHT = 200
+
+DEFAULT_MAX_ITERATIONS = 8
+
+MIN_MAX_ITERATIONS = 1
+
+DEFAULT_CHECKPOINT_RETENTION_DAYS = 30
+
+DEFAULT_BINDING_WEIGHT = 100
+
+AI_AGENT_IDENTITY_FIELDS = (
+    "name",
+    "description",
+    "model",
+    "pattern",
+    "enabled",
+)
+
+AI_AGENT_TUNING_FIELDS = (
+    "temperature",
+    "num_predict",
+    "max_iterations",
+)
+
+AI_AGENT_FIELDS = (*AI_AGENT_IDENTITY_FIELDS, *AI_AGENT_TUNING_FIELDS, "tenant")
+
+AI_TOOL_DEFINITION_FIELDS = (
+    "name",
+    "description",
+    "kind",
+    "enabled",
+    "writable",
+    "advertised_read_only",
+)
+
+AI_TOOL_SOURCE_FIELDS = (
+    "module",
+    "git_repository",
+    "job",
+)
+
+AI_TOOL_DISCOVERY_STAMPS = (
+    "definition_fingerprint",
+    "last_seen_at",
+)
+
+AI_TOOL_FIELDS = (*AI_TOOL_DEFINITION_FIELDS, *AI_TOOL_SOURCE_FIELDS)
+
+AI_AGENT_TOOL_FIELDS = (
+    "agent",
+    "mcp_tool",
+    "ai_tool",
+    "name_override",
+    "description_override",
+    "weight",
+)
+
+AI_AGENT_SUBAGENT_FIELDS = (
+    "parent",
+    "subagent",
+    "tool_name",
+    "tool_description",
+    "input_mode",
+    "weight",
+)
+
+AI_SKILL_FIELDS = (
+    "name",
+    "description",
+    "body",
+    "enabled",
+)
+
+AI_AGENT_SKILL_FIELDS = (
+    "agent",
+    "skill",
+    "weight",
+)
+
+AI_AGENT_THREAD_FIELDS = (
+    "agent",
+    "thread_id",
+    "status",
+    "started_at",
+    "finished_at",
+)
+
+AGENTS_GROUP_WEIGHT = 300

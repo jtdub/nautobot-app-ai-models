@@ -5,8 +5,24 @@ from django.db import DEFAULT_DB_ALIAS
 from django.utils import timezone
 from nautobot.extras.models import ExternalIntegration
 
-from nautobot_ai_models.choices import AIModelKindChoices, AIProviderTypeChoices, MCPTransportChoices
-from nautobot_ai_models.models import AIModel, AIProvider, MCPServer, MCPTool
+from nautobot_ai_models.choices import (
+    AIAgentPatternChoices,
+    AIModelKindChoices,
+    AIProviderTypeChoices,
+    MCPTransportChoices,
+)
+from nautobot_ai_models.models import (
+    AIAgent,
+    AIAgentSkill,
+    AIAgentSubagent,
+    AIAgentThread,
+    AIAgentTool,
+    AIModel,
+    AIProvider,
+    AISkill,
+    MCPServer,
+    MCPTool,
+)
 from nautobot_ai_models.services.mcp import ToolDefinition, definition_fingerprint
 
 RETIRED_NAMES = (
@@ -146,6 +162,58 @@ TOOLS = (
     },
 )
 
+AGENTS = (
+    {
+        "name": "Network Operations Assistant",
+        "description": "Answers a network operations question by asking a specialist.",
+        "system_prompt": (
+            "You answer network operations questions. You have specialists. Use the inventory "
+            "specialist for device records and site codes, and the change specialist for "
+            "maintenance windows. Never state a fact you did not get from a specialist."
+        ),
+        "pattern": AIAgentPatternChoices.SUBAGENTS,
+        "provider": "OpenAI Production",
+    },
+    {
+        "name": "Inventory Specialist",
+        "description": "Look up a network device by hostname. Returns the vendor and the site code.",
+        "system_prompt": (
+            "You look up network device records. Call the lookup tool for every hostname. Report "
+            "the vendor and the site code. Never state a fact you did not get from the tool. Never "
+            "quote a maintenance window: that is another team's job."
+        ),
+        "pattern": AIAgentPatternChoices.SINGLE,
+        "provider": "OpenAI Production",
+    },
+    {
+        "name": "Change Window Specialist",
+        "description": "Return the approved change window for one site. Give it a site code.",
+        "system_prompt": (
+            "You answer questions about approved change windows. You start with no rules loaded. "
+            "Call load_skill before you answer anything."
+        ),
+        "pattern": AIAgentPatternChoices.SKILLS,
+        "provider": "Ollama Lab",
+    },
+)
+
+SKILLS = (
+    {
+        "name": "maintenance_windows",
+        "description": "approved change windows",
+        "body": (
+            "Quote only a window that appears in the change calendar. If the request gives you a "
+            "hostname instead of a site code, say you need the site code first. Do not guess it "
+            "from the hostname."
+        ),
+    },
+    {
+        "name": "escalation",
+        "description": "who to tell, and when",
+        "body": "Escalate to the on-call engineer when a change window has already closed.",
+    },
+)
+
 MCP_SERVERS = (
     {
         "name": "Nautobot MCP",
@@ -281,10 +349,91 @@ class Command(BaseCommand):
                     },
                 )
 
+    def _generate_agents(self, db, now):
+        """Create the agents, their skills, and the bindings between them.
+
+        Every tool binding points at an MCP tool, because `_generate_static_data` already made those.
+        A registered Python tool arrives from the Sync AI Tools Job instead, and only in a deployment
+        whose apps declare one.
+
+        Args:
+            db: The database alias to write to.
+            now: One timestamp for the whole run.
+        """
+        del now
+
+        skills = {}
+        for spec in SKILLS:
+            skills[spec["name"]], _ = AISkill.objects.using(db).update_or_create(
+                name=spec["name"],
+                defaults={"description": spec["description"], "body": spec["body"]},
+            )
+
+        agents = {}
+        for spec in AGENTS:
+            model = AIModel.objects.using(db).filter(provider__name=spec["provider"], kind="chat").first()
+            if model is None:
+                continue
+            agents[spec["name"]], _ = AIAgent.objects.using(db).update_or_create(
+                name=spec["name"],
+                defaults={
+                    "description": spec["description"],
+                    "system_prompt": spec["system_prompt"],
+                    "model": model,
+                    "pattern": spec["pattern"],
+                },
+            )
+
+        supervisor = agents.get("Network Operations Assistant")
+        inventory = agents.get("Inventory Specialist")
+        change = agents.get("Change Window Specialist")
+        if not (supervisor and inventory and change):
+            return
+
+        AIAgentSubagent.objects.using(db).update_or_create(
+            parent=supervisor,
+            subagent=inventory,
+            defaults={
+                "tool_name": "inventory_expert",
+                "tool_description": (
+                    "Look up a network device by hostname. Returns the vendor and the site code. "
+                    "Use this first when you need a site code."
+                ),
+                "weight": 100,
+            },
+        )
+        AIAgentSubagent.objects.using(db).update_or_create(
+            parent=supervisor,
+            subagent=change,
+            defaults={
+                "tool_name": "change_expert",
+                "tool_description": (
+                    "Return the approved change window for one site. You must pass a site code, " "not a hostname."
+                ),
+                "weight": 200,
+            },
+        )
+
+        for weight, skill in enumerate(skills.values(), start=1):
+            AIAgentSkill.objects.using(db).update_or_create(
+                agent=change, skill=skill, defaults={"weight": weight * 100}
+            )
+
+        read_only = MCPTool.objects.using(db).filter(writable=False).first()
+        if read_only is not None:
+            AIAgentTool.objects.using(db).update_or_create(
+                agent=inventory,
+                mcp_tool=read_only,
+                defaults={
+                    "description_override": "Look up one device. Send it a hostname and nothing else.",
+                    "weight": 100,
+                },
+            )
+
     def _flush(self, db):
         """Delete every object _generate_static_data creates.
 
-        The names from before this app renamed its demonstration records are deleted too. The
+        This also deletes the names from before this app renamed its demonstration records. The
         integrations are shared and protected, so a surviving old provider would block them.
 
         Args:
@@ -293,6 +442,14 @@ class Command(BaseCommand):
         server_names = [spec["name"] for spec in MCP_SERVERS] + list(RETIRED_NAMES)
         MCPTool.objects.using(db).filter(mcp_server__name__in=server_names).delete()
         MCPServer.objects.using(db).filter(name__in=server_names).delete()
+
+        agent_names = [spec["name"] for spec in AGENTS]
+        AIAgentTool.objects.using(db).filter(agent__name__in=agent_names).delete()
+        AIAgentSubagent.objects.using(db).filter(parent__name__in=agent_names).delete()
+        AIAgentSkill.objects.using(db).filter(agent__name__in=agent_names).delete()
+        AIAgentThread.objects.using(db).filter(agent__name__in=agent_names).delete()
+        AIAgent.objects.using(db).filter(name__in=agent_names).delete()
+        AISkill.objects.using(db).filter(name__in=[spec["name"] for spec in SKILLS]).delete()
 
         provider_names = [spec["name"] for spec in PROVIDERS] + list(RETIRED_NAMES)
         AIModel.objects.using(db).filter(provider__name__in=provider_names).delete()
@@ -307,4 +464,5 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("Flushing all existing AI Models test data..."))
             self._flush(db)
         self._generate_static_data(db)
+        self._generate_agents(db, timezone.now())
         self.stdout.write(self.style.SUCCESS("Database populated with AI Models test data successfully!"))

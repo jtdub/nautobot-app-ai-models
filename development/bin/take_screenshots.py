@@ -30,31 +30,31 @@ REPO_ROOT = Path(__file__).parent.parent.parent
 IMAGE_DIR = REPO_ROOT / "docs" / "images"
 MEDIA_DIR = REPO_ROOT / "docs" / "media"
 
-# The development instance shows a "Local" banner that production users never see.
 HIDE_CHROME_CSS = """
 header#header .banner-alert-area { display: none !important; }
 """
 
-# The Django Debug Toolbar renders inside a shadow root, so CSS cannot reach it. Remove the host.
 REMOVE_DEBUG_TOOLBAR_JS = "() => { document.getElementById('djDebugRoot')?.remove(); }"
 
 VIEWPORT = {"width": 1600, "height": 760}
 
-#: List views, captured whole. Each entry is a name and the path to visit.
 LIST_VIEWS = (
     ("ai-providers-list", "/plugins/ai-models/ai-providers/"),
     ("ai-models-list", "/plugins/ai-models/ai-models/"),
     ("mcp-servers-list", "/plugins/ai-models/mcp-servers/"),
     ("mcp-tools-list", "/plugins/ai-models/mcp-tools/"),
+    ("ai-agents-list", "/plugins/ai-models/ai-agents/"),
 )
+"""List views to capture whole. Each entry is a name and the path to visit."""
 
-#: Detail views. Each entry is a name, a list path, and the search term that picks the row.
 DETAIL_VIEWS = (
     ("ai-provider-detail", "/plugins/ai-models/ai-providers/", "Ollama Lab"),
     ("ai-model-detail", "/plugins/ai-models/ai-models/", "gpt-4o-mini"),
     ("mcp-server-detail", "/plugins/ai-models/mcp-servers/", "Nautobot MCP"),
     ("mcp-tool-detail", "/plugins/ai-models/mcp-tools/", "get_device"),
+    ("ai-agent-detail", "/plugins/ai-models/ai-agents/", "Network Operations Assistant"),
 )
+"""Detail views to capture. Each entry is a name, a list path, and the search term that picks the row."""
 
 
 def log(message):
@@ -182,7 +182,6 @@ def capture_theme(browser, base_url, args, theme):
     capture_job_result(page, base_url, "Discover AI Models", IMAGE_DIR / f"ai-discovery-job-result-{theme}.png")
     capture_navigation(page, base_url, IMAGE_DIR / f"ai-tools-navigation-{theme}.png")
 
-    # The app overview page shows one image for each theme.
     capture_list(page, base_url, "/plugins/ai-models/ai-providers/", MEDIA_DIR / f"ss_main_page_{theme}.png")
 
     context.close()

@@ -1,11 +1,11 @@
 """Add the registry fields a consuming app needs. See issues #2, #3, #4 and #5.
 
-Each column is added nullable, filled in, and only then altered to its final shape.
+This migration adds each column nullable, fills it in, and only then alters it to its final shape.
 
-The three steps stay in one file because the order is load-bearing. Django's null-to-not-null
-AlterField writes the field default into every row that is still NULL, so an alter that ran before
-the backfill would give every provider the dialect ``openai``, which is the guess that
-fill_in_the_new_columns exists to refuse.
+The three steps stay in one file because the order matters. The Django null-to-not-null AlterField
+writes the field default into every row that is still NULL. An alter that ran before the backfill
+would give every provider the dialect ``openai``, which is the guess that fill_in_the_new_columns
+exists to refuse.
 """
 
 from django.db import migrations, models
@@ -16,13 +16,13 @@ def fill_in_the_new_columns(apps, schema_editor):
 
     A provider that served the OpenAI shape becomes ``openai_compatible``, but only when its
     integration carries a remote URL. That dialect is an address rather than a service, so
-    AIProvider.clean() requires the URL, and labelling a row that has none would make it refuse
+    AIProvider.clean() requires the URL. A label on a row that has none would make the row refuse
     every later save over a field nobody touched.
 
-    Every other provider is left empty. The boolean says nothing about what a row that was not
-    OpenAI-shaped speaks instead, and a guess would send the credential elsewhere. The model
-    refuses an empty value, and the form offers an empty option for such a row, so an operator
-    answers on the next save.
+    This migration leaves every other provider empty. The boolean says nothing about what a row
+    that was not OpenAI-shaped speaks instead, and a guess would send the credential elsewhere.
+    The model refuses an empty value, and the form offers an empty option, so an operator answers
+    on the next save.
 
     The other three columns carry the meaning that every row already had.
 

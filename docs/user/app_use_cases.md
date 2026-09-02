@@ -4,14 +4,17 @@ This document describes the common use cases for this app.
 
 ## General Usage
 
-The app holds two registries under one **AI Tools** menu.
+The app holds three groups under one **AI Tools** menu.
 
 - **AI Tools → AI Models** lists **AI Providers** and **AI Models**: the LLM endpoints and the
   models that each one offers.
 - **AI Tools → MCP Models** lists **MCP Servers** and **MCP Tools**: the MCP servers and what each
   one advertises.
+- **AI Tools → Agents** lists **AI Agents**, **AI Tools**, **AI Skills**, and **Agent Threads**:
+  what an agent is made of, what it may reach, and the conversations it left behind.
 
-Neither registry calls anything. Both record what exists, so that other apps read one place.
+Nothing here calls a model. The first two groups record what exists. The third describes an agent,
+so that another app builds one from rows instead of from Python.
 
 ![The AI Tools navigation tab](../images/ai-tools-navigation-light.png#only-light)
 ![The AI Tools navigation tab](../images/ai-tools-navigation-dark.png#only-dark)

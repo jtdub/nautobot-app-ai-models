@@ -3,6 +3,7 @@
 from nautobot.apps.ui import NavMenuAddButton, NavMenuGroup, NavMenuItem, NavMenuTab
 
 from nautobot_ai_models.constants import (
+    AGENTS_GROUP_WEIGHT,
     AI_MODELS_GROUP_WEIGHT,
     AI_TOOLS_TAB_ICON,
     AI_TOOLS_TAB_NAME,
@@ -60,6 +61,41 @@ mcp_model_items = (
     ),
 )
 
+agent_items = (
+    NavMenuItem(
+        link="plugins:nautobot_ai_models:aiagent_list",
+        name="AI Agents",
+        permissions=["nautobot_ai_models.view_aiagent"],
+        buttons=(
+            NavMenuAddButton(
+                link="plugins:nautobot_ai_models:aiagent_add",
+                permissions=["nautobot_ai_models.add_aiagent"],
+            ),
+        ),
+    ),
+    NavMenuItem(
+        link="plugins:nautobot_ai_models:aitool_list",
+        name="AI Tools",
+        permissions=["nautobot_ai_models.view_aitool"],
+    ),
+    NavMenuItem(
+        link="plugins:nautobot_ai_models:aiskill_list",
+        name="AI Skills",
+        permissions=["nautobot_ai_models.view_aiskill"],
+        buttons=(
+            NavMenuAddButton(
+                link="plugins:nautobot_ai_models:aiskill_add",
+                permissions=["nautobot_ai_models.add_aiskill"],
+            ),
+        ),
+    ),
+    NavMenuItem(
+        link="plugins:nautobot_ai_models:aiagentthread_list",
+        name="Agent Threads",
+        permissions=["nautobot_ai_models.view_aiagentthread"],
+    ),
+)
+
 menu_items = (
     NavMenuTab(
         name=AI_TOOLS_TAB_NAME,
@@ -75,6 +111,11 @@ menu_items = (
                 name="MCP Models",
                 weight=MCP_MODELS_GROUP_WEIGHT,
                 items=mcp_model_items,
+            ),
+            NavMenuGroup(
+                name="Agents",
+                weight=AGENTS_GROUP_WEIGHT,
+                items=agent_items,
             ),
         ),
     ),
