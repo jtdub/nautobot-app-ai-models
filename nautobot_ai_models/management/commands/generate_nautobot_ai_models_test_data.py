@@ -7,6 +7,7 @@ from nautobot.extras.models import ExternalIntegration
 
 from nautobot_ai_models.choices import (
     AIAgentPatternChoices,
+    AIAgentThreadStatusChoices,
     AIModelKindChoices,
     AIProviderTypeChoices,
     MCPTransportChoices,
@@ -20,10 +21,22 @@ from nautobot_ai_models.models import (
     AIModel,
     AIProvider,
     AISkill,
+    AIToolApproval,
+    AIUsageRecord,
+    MCPPrompt,
+    MCPResource,
     MCPServer,
     MCPTool,
 )
-from nautobot_ai_models.services.mcp import ToolDefinition, definition_fingerprint
+from nautobot_ai_models.services.mcp import (
+    PROMPT_KIND,
+    RESOURCE_KIND,
+    PromptDefinition,
+    ResourceDefinition,
+    ToolDefinition,
+    definition_fingerprint,
+)
+from nautobot_ai_models.services.usage import cost_of
 
 RETIRED_NAMES = (
     "Demo OpenAI",
@@ -56,6 +69,11 @@ PROVIDERS = (
                 "kind": AIModelKindChoices.CHAT,
                 "input_cost_per_million": "0.1500",
                 "output_cost_per_million": "0.6000",
+                "context_window": 128000,
+                "max_output_tokens": 16384,
+                "supports_tools": True,
+                "supports_vision": True,
+                "supports_structured_output": True,
                 "default_parameters": {"seed": 7, "top_p": 0.9},
             },
             {
@@ -64,6 +82,11 @@ PROVIDERS = (
                 "kind": AIModelKindChoices.CHAT,
                 "input_cost_per_million": "2.5000",
                 "output_cost_per_million": "10.0000",
+                "context_window": 128000,
+                "max_output_tokens": 16384,
+                "supports_tools": True,
+                "supports_vision": True,
+                "supports_structured_output": True,
                 "default_parameters": {},
             },
             {
@@ -72,6 +95,11 @@ PROVIDERS = (
                 "kind": AIModelKindChoices.EMBEDDING,
                 "input_cost_per_million": "0.0200",
                 "output_cost_per_million": None,
+                "context_window": 8191,
+                "max_output_tokens": None,
+                "supports_tools": False,
+                "supports_vision": False,
+                "supports_structured_output": False,
                 "default_parameters": {},
             },
         ),
@@ -91,6 +119,11 @@ PROVIDERS = (
                 "kind": AIModelKindChoices.CHAT,
                 "input_cost_per_million": None,
                 "output_cost_per_million": None,
+                "context_window": 8192,
+                "max_output_tokens": 4096,
+                "supports_tools": True,
+                "supports_vision": None,
+                "supports_structured_output": None,
                 "default_parameters": {"top_k": 40, "top_p": 0.9, "seed": 42},
             },
             {
@@ -99,6 +132,11 @@ PROVIDERS = (
                 "kind": AIModelKindChoices.EMBEDDING,
                 "input_cost_per_million": None,
                 "output_cost_per_million": None,
+                "context_window": 8192,
+                "max_output_tokens": None,
+                "supports_tools": False,
+                "supports_vision": False,
+                "supports_structured_output": False,
                 "default_parameters": {},
             },
         ),
@@ -118,6 +156,11 @@ PROVIDERS = (
                 "kind": AIModelKindChoices.CHAT,
                 "input_cost_per_million": "3.0000",
                 "output_cost_per_million": "15.0000",
+                "context_window": 200000,
+                "max_output_tokens": 64000,
+                "supports_tools": True,
+                "supports_vision": True,
+                "supports_structured_output": True,
                 "default_parameters": {},
             },
         ),
@@ -214,6 +257,43 @@ SKILLS = (
     },
 )
 
+RESOURCES = (
+    {
+        "uri": "nautobot://devices/inventory",
+        "name": "inventory",
+        "title": "Device inventory",
+        "description": "Every device this Nautobot knows about, with its site and its role.",
+        "mime_type": "application/json",
+        "is_template": False,
+    },
+    {
+        "uri": "nautobot://sites/{site_code}",
+        "name": "site",
+        "title": "One site",
+        "description": "One site by its code, with its address and its change window.",
+        "mime_type": "application/json",
+        "is_template": True,
+    },
+)
+
+PROMPTS = (
+    {
+        "name": "triage_device",
+        "title": "Triage a device",
+        "description": "Walk an operator through a device that stopped answering.",
+        "arguments": [
+            {"name": "hostname", "description": "The device that is down.", "required": True},
+            {"name": "since", "description": "When it started, in words.", "required": False},
+        ],
+    },
+    {
+        "name": "summarise_change_window",
+        "title": "Summarise a change window",
+        "description": "Turn one approved change window into a paragraph an on-call engineer reads.",
+        "arguments": [{"name": "site_code", "description": "The site code.", "required": True}],
+    },
+)
+
 MCP_SERVERS = (
     {
         "name": "Nautobot MCP",
@@ -229,6 +309,8 @@ MCP_SERVERS = (
             "capabilities": {"tools": {"listChanged": True}, "resources": {"subscribe": False}},
         },
         "tools": TOOLS,
+        "resources": RESOURCES,
+        "prompts": PROMPTS,
     },
     {
         "name": "Local Toolbox",
@@ -238,6 +320,8 @@ MCP_SERVERS = (
         "enabled": True,
         "discovered": None,
         "tools": (),
+        "resources": (),
+        "prompts": (),
     },
 )
 
@@ -307,6 +391,11 @@ class Command(BaseCommand):
                         "kind": model_spec["kind"],
                         "input_cost_per_million": model_spec["input_cost_per_million"],
                         "output_cost_per_million": model_spec["output_cost_per_million"],
+                        "context_window": model_spec["context_window"],
+                        "max_output_tokens": model_spec["max_output_tokens"],
+                        "supports_tools": model_spec["supports_tools"],
+                        "supports_vision": model_spec["supports_vision"],
+                        "supports_structured_output": model_spec["supports_structured_output"],
                         "default_parameters": model_spec["default_parameters"],
                     },
                 )
@@ -343,6 +432,50 @@ class Command(BaseCommand):
                                 input_schema=tool_spec["input_schema"],
                                 output_schema=tool_spec["output_schema"],
                                 read_only_hint=tool_spec["advertised_read_only"],
+                            )
+                        ),
+                        "last_seen_at": now,
+                    },
+                )
+
+            for resource_spec in spec["resources"]:
+                MCPResource.objects.using(db).get_or_create(
+                    mcp_server=server,
+                    uri=resource_spec["uri"],
+                    defaults={
+                        "name": resource_spec["name"],
+                        "title": resource_spec["title"],
+                        "description": resource_spec["description"],
+                        "mime_type": resource_spec["mime_type"],
+                        "is_template": resource_spec["is_template"],
+                        "definition_fingerprint": RESOURCE_KIND.fingerprint(
+                            ResourceDefinition(
+                                uri=resource_spec["uri"],
+                                name=resource_spec["name"],
+                                title=resource_spec["title"],
+                                description=resource_spec["description"],
+                                mime_type=resource_spec["mime_type"],
+                                is_template=resource_spec["is_template"],
+                            )
+                        ),
+                        "last_seen_at": now,
+                    },
+                )
+
+            for prompt_spec in spec["prompts"]:
+                MCPPrompt.objects.using(db).get_or_create(
+                    mcp_server=server,
+                    name=prompt_spec["name"],
+                    defaults={
+                        "title": prompt_spec["title"],
+                        "description": prompt_spec["description"],
+                        "arguments": prompt_spec["arguments"],
+                        "definition_fingerprint": PROMPT_KIND.fingerprint(
+                            PromptDefinition(
+                                name=prompt_spec["name"],
+                                title=prompt_spec["title"],
+                                description=prompt_spec["description"],
+                                arguments=tuple(prompt_spec["arguments"]),
                             )
                         ),
                         "last_seen_at": now,
@@ -420,14 +553,57 @@ class Command(BaseCommand):
             )
 
         read_only = MCPTool.objects.using(db).filter(writable=False).first()
-        if read_only is not None:
-            AIAgentTool.objects.using(db).update_or_create(
-                agent=inventory,
-                mcp_tool=read_only,
-                defaults={
-                    "description_override": "Look up one device. Send it a hostname and nothing else.",
-                    "weight": 100,
-                },
+        if read_only is None:
+            return
+
+        binding, _ = AIAgentTool.objects.using(db).update_or_create(
+            agent=inventory,
+            mcp_tool=read_only,
+            defaults={
+                "description_override": "Look up one device. Send it a hostname and nothing else.",
+                "weight": 100,
+            },
+        )
+        AIToolApproval.objects.using(db).get_or_create(
+            binding=binding,
+            fingerprint=binding.fingerprint,
+            defaults={
+                "approved_by_name": "admin",
+                "note": "A read of one device. Nothing to review beyond the argument.",
+            },
+        )
+
+        self._generate_run(db, supervisor, inventory)
+
+    def _generate_run(self, db, supervisor, specialist):
+        """Create one finished thread and the usage it spent.
+
+        A supervisor call and a specialist call, so the Usage page shows what it is for: the
+        specialist's spend is its own, not the supervisor's.
+
+        Args:
+            db: The database alias to write to.
+            supervisor: The agent that took the question.
+            specialist: The agent it delegated to.
+        """
+        thread, created = AIAgentThread.objects.using(db).get_or_create(
+            agent=supervisor,
+            status=AIAgentThreadStatusChoices.COMPLETED,
+            defaults={"finished_at": timezone.now()},
+        )
+        if not created:
+            return
+
+        for agent, sent, returned in ((supervisor, 2140, 180), (specialist, 860, 120), (supervisor, 2460, 340)):
+            AIUsageRecord.objects.using(db).create(
+                thread=thread,
+                agent=agent,
+                model=agent.model,
+                input_tokens=sent,
+                output_tokens=returned,
+                input_cost=cost_of(sent, agent.model.input_cost_per_million),
+                output_cost=cost_of(returned, agent.model.output_cost_per_million),
+                usage_payload={"prompt_tokens": sent, "completion_tokens": returned},
             )
 
     def _flush(self, db):
@@ -436,20 +612,27 @@ class Command(BaseCommand):
         This also deletes the names from before this app renamed its demonstration records. The
         integrations are shared and protected, so a surviving old provider would block them.
 
+        The order matters. Every binding goes first, because a binding protects the tool, the
+        model and the skill it points at.
+
         Args:
             db: The database alias to delete from.
         """
-        server_names = [spec["name"] for spec in MCP_SERVERS] + list(RETIRED_NAMES)
-        MCPTool.objects.using(db).filter(mcp_server__name__in=server_names).delete()
-        MCPServer.objects.using(db).filter(name__in=server_names).delete()
-
         agent_names = [spec["name"] for spec in AGENTS]
+        AIToolApproval.objects.using(db).filter(binding__agent__name__in=agent_names).delete()
         AIAgentTool.objects.using(db).filter(agent__name__in=agent_names).delete()
         AIAgentSubagent.objects.using(db).filter(parent__name__in=agent_names).delete()
         AIAgentSkill.objects.using(db).filter(agent__name__in=agent_names).delete()
+        AIUsageRecord.objects.using(db).filter(agent__name__in=agent_names).delete()
         AIAgentThread.objects.using(db).filter(agent__name__in=agent_names).delete()
         AIAgent.objects.using(db).filter(name__in=agent_names).delete()
         AISkill.objects.using(db).filter(name__in=[spec["name"] for spec in SKILLS]).delete()
+
+        server_names = [spec["name"] for spec in MCP_SERVERS] + list(RETIRED_NAMES)
+        MCPResource.objects.using(db).filter(mcp_server__name__in=server_names).delete()
+        MCPPrompt.objects.using(db).filter(mcp_server__name__in=server_names).delete()
+        MCPTool.objects.using(db).filter(mcp_server__name__in=server_names).delete()
+        MCPServer.objects.using(db).filter(name__in=server_names).delete()
 
         provider_names = [spec["name"] for spec in PROVIDERS] + list(RETIRED_NAMES)
         AIModel.objects.using(db).filter(provider__name__in=provider_names).delete()

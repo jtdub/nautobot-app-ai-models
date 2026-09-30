@@ -13,17 +13,32 @@ AI Models makes Nautobot the source of truth for your AI estate. It holds two re
 The app is a catalog. It does no inference and it calls no tool. Another app, a Job, or an external
 system reads these records and does the work.
 
-There are four models, in two pairs:
+The models fall into three groups.
+
+**The LLM estate:**
 
 - **AI Provider** — one remote LLM endpoint. It points at a Nautobot External Integration, which
   holds the URL, the headers, the TLS settings, the timeout, and the Secrets Group. The app keeps
   no credential of its own.
-- **AI Model** — one model that a provider offers, with an enabled flag, a kind, and optional
-  inference defaults.
+- **AI Model** — one model that a provider offers, with an enabled flag, a kind, what it costs, and
+  what it can do.
+
+**What an MCP server advertises:**
+
 - **MCP Server** — one MCP server. It points at its own External Integration and holds what the
   server reported about itself on the last discovery run.
 - **MCP Tool** — one tool that a server advertises. It holds both advertised JSON Schemas, a
   fingerprint of its contract, and the two flags that a person owns: `enabled` and `writable`.
+- **MCP Resource** — one resource that a server advertises. There is no `writable` flag, because a
+  resource is read by protocol.
+- **MCP Prompt** — one prompt template that a server advertises.
+
+**Agents, and what they may reach:**
+
+- **AI Agent**, **AI Tool**, **AI Skill**, and the three bindings that join them.
+- **AI Tool Approval** — one record that a person accepted what a tool binding offers. The app
+  records the decision and enforces nothing.
+- **AI Agent Thread** — a handle on one conversation.
 
 ## Audience (User Personas) - Who must use this App?
 
@@ -57,5 +72,5 @@ There are four models, in two pairs:
 - **Custom Fields** — the app creates none. Each model accepts custom fields.
 - **Jobs** — **Discover AI Models** in the "AI Models" group, and **MCP Server Discovery** in the
   "MCP Models" group.
-- **Tags** — only **MCP Server** has them. The other three are catalog records with no tags and no
-  dynamic groups.
+- **Tags** — only **MCP Server** and **AI Agent** have them. Every other model is a catalog record
+  with no tags and no dynamic groups.

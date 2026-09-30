@@ -13,27 +13,61 @@ This app does no inference.
 | `provider` | foreign key to `AIProvider` | yes | The provider that offers this model. If you delete the provider, you also delete its models. |
 | `name` | string | yes | The model identifier that the provider expects, for example `gpt-4o-mini`. Unique in one provider. |
 | `description` | string | no | Free text. |
-| `kind` | choice | yes | What this model is for: `chat` or `embedding`. The default is `chat`. A person sets it, because discovery cannot tell the two apart. |
+| `kind` | choice | yes | What this model is for. The default is `chat`. A person sets it, because discovery cannot tell one kind from another. |
 | `enabled` | boolean | yes | A consumer must ignore a disabled model. The default is `True`. |
 | `num_predict` | integer | no | Overrides the provider default. Leave it empty to inherit. |
 | `temperature` | decimal | no | Overrides the provider default. Leave it empty to inherit. |
 | `input_cost_per_million` | decimal | no | The cost of a million input tokens, in the billing currency of the provider. |
 | `output_cost_per_million` | decimal | no | The cost of a million output tokens. Usually several times the input price. |
 | `default_parameters` | JSON object | no | Extra request parameters to send with each call, limited to an allowlist. The default is `{}`. |
+| `context_window` | integer | no | How many tokens the model accepts in one call, the prompt and the answer together. |
+| `max_output_tokens` | integer | no | The most tokens the model returns in one answer. |
+| `supports_tools` | boolean | no | Whether the model can call a tool. Three states: yes, no, and unrecorded. |
+| `supports_vision` | boolean | no | Whether the model accepts an image in a message. Three states. |
+| `supports_structured_output` | boolean | no | Whether the model answers to a JSON Schema. Three states. |
 
 ## Kind
 
-A chat model and an embedding model are not interchangeable. They are not even the same endpoint.
+Two kinds of model are not interchangeable. They are usually not even the same endpoint.
+
+| Kind | What it is for |
+|---|---|
+| `chat` | A conversation. This is the only kind an [AI Agent](aiagent.md) accepts. |
+| `embedding` | A vector for retrieval. |
+| `rerank` | An order over a set of candidate documents. |
+| `vision` | An image in, text out. |
+| `image` | Text in, an image out. |
+| `audio` | Speech to text, or text to speech. |
+| `completion` | The legacy completion endpoint. |
 
 The usual failure is not a call to the wrong endpoint. It is an operator who configures a retrieval
 feature with a chat model, or triage with an embedding model. The provider then gives a confusing
 error, at a bad hour, and far from the screen where the mistake occurred. This field turns that
 into a refusal before any network traffic.
 
-The **Discover AI Models** job leaves `kind` at its default. `GET /v1/models` returns both kinds
+The **Discover AI Models** job leaves `kind` at its default. `GET /v1/models` returns every kind
 together and has no field that says which is which. Thus the job records what the endpoint said,
-and a person makes the decision. `enabled` and `writable` on [MCP Tool](mcptool.md) divide the work
-the same way.
+and a person makes the decision. The job says so in its own log line. `enabled` and `writable` on
+[MCP Tool](mcptool.md) divide the work the same way.
+
+## Capabilities
+
+Five fields record what the model can do. A person fills them in. Discovery cannot learn any of
+them from `GET /v1/models`.
+
+CAUTION: An empty boolean means that nobody has recorded an answer. It does not mean no. Read the
+three states with `is`, never with a truth test.
+
+`supports_tools` is the one that fails loudly. An [AI Agent](aiagent.md) refuses to save when its
+model is recorded as unable to call a tool and the agent has tools or subagents bound to it. A
+supervisor reaches a specialist as a tool as well, so both bindings count. An unrecorded value
+refuses nothing.
+
+The two size fields check each other:
+
+- `max_output_tokens` cannot be larger than `context_window`. The window holds the prompt as well.
+- `num_predict` cannot be larger than `max_output_tokens`. A value of `-1` means unlimited and
+  passes the check, because the provider then applies its own ceiling.
 
 ## Availability
 

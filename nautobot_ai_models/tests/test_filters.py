@@ -208,6 +208,55 @@ class MCPToolFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=
         self.assertEqual(self.queryset.filter(advertised_read_only__isnull=True).count(), 1)
 
 
+class MCPResourceFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=too-many-ancestors
+    """MCPResource Filter Test Case."""
+
+    queryset = models.MCPResource.objects.all()
+    filterset = filters.MCPResourceFilterSet
+    generic_filter_tests = (("id",), ("created",), ("last_updated",), ("uri",), ("name",))
+
+    @classmethod
+    def setUpTestData(cls):
+        """Set up test data for the MCPResource model."""
+        fixtures.create_mcpresource()
+
+    def test_filtering_by_server(self):
+        """What does this server offer is the panel on its own page."""
+        server = models.MCPResource.objects.first().mcp_server
+        self.assertEqual(
+            self.filterset({"mcp_server": [server.name]}, self.queryset).qs.count(),
+            self.queryset.filter(mcp_server=server).count(),
+        )
+
+    def test_filtering_the_templates_apart(self):
+        """A template URI is not one a client can read directly."""
+        self.assertEqual(
+            self.filterset({"is_template": True}, self.queryset).qs.count(),
+            self.queryset.filter(is_template=True).count(),
+        )
+
+
+class MCPPromptFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=too-many-ancestors
+    """MCPPrompt Filter Test Case."""
+
+    queryset = models.MCPPrompt.objects.all()
+    filterset = filters.MCPPromptFilterSet
+    generic_filter_tests = (("id",), ("created",), ("last_updated",), ("name",))
+
+    @classmethod
+    def setUpTestData(cls):
+        """Set up test data for the MCPPrompt model."""
+        fixtures.create_mcpprompt()
+
+    def test_filtering_by_server(self):
+        """What does this server offer is the panel on its own page."""
+        server = models.MCPPrompt.objects.first().mcp_server
+        self.assertEqual(
+            self.filterset({"mcp_server": [server.name]}, self.queryset).qs.count(),
+            self.queryset.filter(mcp_server=server).count(),
+        )
+
+
 class AIToolFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=too-many-ancestors
     """AITool Filter Test Case."""
 
@@ -300,6 +349,35 @@ class AIAgentToolFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disa
         """Which agents may call this tool is the panel on the tool's page."""
         tool = models.AITool.objects.get(name="lookup_device")
         self.assertEqual(self.filterset({"ai_tool": [tool.name]}, self.queryset).qs.count(), 1)
+
+
+class AIToolApprovalFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=too-many-ancestors
+    """AIToolApproval Filter Test Case."""
+
+    queryset = models.AIToolApproval.objects.all()
+    filterset = filters.AIToolApprovalFilterSet
+    generic_filter_tests = (("id",), ("created",), ("last_updated",), ("fingerprint",))
+
+    @classmethod
+    def setUpTestData(cls):
+        """Set up test data for the AIToolApproval model."""
+        fixtures.create_aitoolapproval()
+
+    def test_filtering_by_agent_reaches_through_the_binding(self):
+        """What has this agent had approved is the question an auditor asks."""
+        approval = models.AIToolApproval.objects.first()
+        agent = approval.binding.agent
+        self.assertEqual(
+            self.filterset({"agent": [agent.name]}, self.queryset).qs.count(),
+            self.queryset.filter(binding__agent=agent).count(),
+        )
+
+    def test_filtering_out_the_withdrawn_ones(self):
+        """Every approval still standing is the other question."""
+        self.assertEqual(
+            self.filterset({"is_revoked": False}, self.queryset).qs.count(),
+            self.queryset.filter(revoked_at__isnull=True).count(),
+        )
 
 
 class AIAgentSubagentFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=too-many-ancestors

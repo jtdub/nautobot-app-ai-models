@@ -129,7 +129,11 @@ class DiscoverAIModels(Job):
                 )
                 ai_model.validated_save()
                 created += 1
-                self.logger.info("Created AI Model.", extra={"object": ai_model})
+                self.logger.info(
+                    "Created AI Model. The kind defaulted to chat, because GET /v1/models does not "
+                    "say what a model is for. Set it by hand.",
+                    extra={"object": ai_model},
+                )
                 continue
 
             if entry["description"] and not ai_model.description:
@@ -162,10 +166,11 @@ class MCPServerDiscovery(Job):
     )
     remove_stale = BooleanVar(
         default=False,
-        label="Remove stale tools",
+        label="Remove stale records",
         description=(
-            "Delete tools the server no longer advertises instead of disabling them. Off by "
-            "default: a server having a bad minute should not erase a reviewed registry."
+            "Delete tools, resources, and prompts the server no longer advertises instead of "
+            "disabling them. Off by default: a server having a bad minute should not erase a "
+            "reviewed registry."
         ),
     )
 
@@ -173,7 +178,7 @@ class MCPServerDiscovery(Job):
         """Job metadata."""
 
         name = "MCP Server Discovery"
-        description = "Read each MCP server's tool list and record what it advertises."
+        description = "Read each MCP server's tools, resources, and prompts, and record what it advertises."
         has_sensitive_variables = False
         soft_time_limit = 1800
         time_limit = 2100
@@ -219,7 +224,7 @@ class MCPServerDiscovery(Job):
 
         Args:
             server: The MCPServer to read.
-            remove_stale: Delete tools the server no longer advertises.
+            remove_stale: Delete records the server no longer advertises.
 
         Returns:
             bool: True when the run succeeded.
@@ -231,34 +236,53 @@ class MCPServerDiscovery(Job):
             return False
 
         self.logger.info("Discovered %s: %s", server, report.summary(), extra={"object": server})
-        for tool in report.added:
+        for label, sub_report in report.by_kind():
+            self._report_one_kind(server, label, sub_report)
+        return True
+
+    def _report_one_kind(self, server, label, report):
+        """Log what one pass changed for one kind of advertised record.
+
+        Args:
+            server: The MCPServer that was read.
+            label: What to call the record in a log line.
+            report: What that pass changed.
+        """
+        review = "Review whether it writes." if label == "Tool" else "Review it."
+        for record in report.added:
             self.logger.info(
-                "New tool %s. Review whether it writes.%s",
-                tool.name,
-                "" if tool.enabled else " It is disabled until somebody enables it.",
-                extra={"object": tool},
+                "New %s %s. %s%s",
+                label.lower(),
+                record.name or record,
+                review,
+                "" if record.enabled else " It is disabled until somebody enables it.",
+                extra={"object": record},
             )
         disabled_by_change = set(report.disabled_by_change)
-        for tool in report.definition_changed:
-            if tool in disabled_by_change:
+        for record in report.definition_changed:
+            if record in disabled_by_change:
                 self.logger.warning(
-                    "Tool %s changed its definition and has been disabled. Review it, then enable it again.",
-                    tool.name,
-                    extra={"object": tool},
+                    "%s %s changed its definition and has been disabled. Review it, then enable it again.",
+                    label,
+                    record.name or record,
+                    extra={"object": record},
                 )
                 continue
             self.logger.warning(
-                "Tool %s changed its definition since it was last read. Review it again.",
-                tool.name,
-                extra={"object": tool},
+                "%s %s changed its definition since it was last read. Review it again.",
+                label,
+                record.name or record,
+                extra={"object": record},
             )
-        for tool in report.missing:
+        for record in report.missing:
             self.logger.warning(
-                "Tool %s is no longer advertised and has been disabled.", tool.name, extra={"object": tool}
+                "%s %s is no longer advertised and has been disabled.",
+                label,
+                record.name or record,
+                extra={"object": record},
             )
-        for label in report.removed:
-            self.logger.warning("Deleted %s: no longer advertised.", label, extra={"object": server})
-        return True
+        for deleted in report.removed:
+            self.logger.warning("Deleted %s: no longer advertised.", deleted, extra={"object": server})
 
 
 class SyncAITools(Job):
@@ -376,7 +400,7 @@ class PruneAgentThreads(Job):
 
         Args:
             days: Override the configured window.
-            delete_rows: Also delete the AIAgentThread records.
+            delete_rows: Also delete the AIAgentThread records. The usage records go either way.
             dry_run: Report only.
 
         Returns:
@@ -393,7 +417,10 @@ class PruneAgentThreads(Job):
             return f"Dry run: {count} thread(s) would be pruned."
 
         result = checkpoints.prune(days=window, delete_rows=delete_rows)
-        return f"Pruned {result['threads']} thread(s) and {result['rows']} checkpoint row(s)."
+        return (
+            f"Pruned {result['threads']} thread(s), {result['rows']} checkpoint row(s) and "
+            f"{result['usage']} usage record(s)."
+        )
 
 
 jobs = [DiscoverAIModels, MCPServerDiscovery, SyncAITools, PruneAgentThreads]

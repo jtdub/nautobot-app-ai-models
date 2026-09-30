@@ -13,7 +13,7 @@ This app builds an agent from these rows. It does not run one. A consuming app r
 | `name` | String | Yes | Unique. Also the name a supervisor calls this agent by, unless a binding overrides it. |
 | `description` | String | No | What this agent is for. Read the caution below before you write it. |
 | `system_prompt` | Text | Yes | The standing instructions of the agent. |
-| `model` | AI Model | Yes | The chat model. An embedding model is refused. |
+| `model` | AI Model | Yes | The chat model. Any other kind is refused, and so is a model recorded as unable to call a tool when this agent has one bound. |
 | `pattern` | Choice | Yes | `single`, `subagents`, or `skills`. |
 | `enabled` | Boolean | Yes | A disabled agent is not built. |
 | `temperature` | Decimal | No | Overrides the model. |
@@ -31,6 +31,20 @@ description first.
 Write the description the way you write it for a new colleague on the first day. Say what the agent
 does. Say what to send it. Keep it to one or two sentences on one line. A bulleted, multi-line
 description stopped a tool being called at all in every measured run.
+
+## The model has to be able to do the work
+
+Two checks run when you save an agent.
+
+The `kind` of the model must be `chat`. An embedding model does not talk, and no other kind holds a
+system prompt and a tool-call loop.
+
+The model must also be able to call a tool, when this agent has one. An agent is refused when
+`supports_tools` on its model is recorded as `no` and the agent has tool bindings or subagent
+bindings. A supervisor reaches a specialist as a tool as well, so both count.
+
+An unrecorded `supports_tools` refuses nothing. Nobody has answered the question, and an empty
+value is not a no. See [AI Model](aimodel.md#capabilities).
 
 ## Three settings resolve in one chain
 

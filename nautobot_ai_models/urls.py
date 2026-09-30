@@ -43,13 +43,17 @@ router.register("ai-providers", views.AIProviderUIViewSet)
 router.register("ai-models", views.AIModelUIViewSet)
 router.register("mcp-servers", views.MCPServerUIViewSet)
 router.register("mcp-tools", views.MCPToolUIViewSet)
+router.register("mcp-resources", views.MCPResourceUIViewSet)
+router.register("mcp-prompts", views.MCPPromptUIViewSet)
 router.register("ai-tools", views.AIToolUIViewSet)
 router.register("ai-agents", views.AIAgentUIViewSet)
 router.register("ai-agent-tools", views.AIAgentToolUIViewSet)
+router.register("ai-tool-approvals", views.AIToolApprovalUIViewSet)
 router.register("ai-agent-subagents", views.AIAgentSubagentUIViewSet)
 router.register("ai-skills", views.AISkillUIViewSet)
 router.register("ai-agent-skills", views.AIAgentSkillUIViewSet)
 router.register("ai-agent-threads", views.AIAgentThreadUIViewSet)
+router.register("ai-usage-records", views.AIUsageRecordUIViewSet)
 
 
 urlpatterns = [

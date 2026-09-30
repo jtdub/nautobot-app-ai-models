@@ -22,11 +22,16 @@ from nautobot_ai_models.constants import (
     AI_AGENT_SUBAGENT_FIELDS,
     AI_AGENT_THREAD_FIELDS,
     AI_AGENT_TOOL_FIELDS,
+    AI_MODEL_CAPABILITY_FIELDS,
     AI_MODEL_FIELDS,
     AI_SKILL_FIELDS,
+    AI_TOOL_APPROVAL_FIELDS,
     AI_TOOL_DEFINITION_FIELDS,
     AI_TOOL_DISCOVERY_STAMPS,
     AI_TOOL_SOURCE_FIELDS,
+    AI_USAGE_RECORD_FIELDS,
+    MCP_PROMPT_DEFINITION_FIELDS,
+    MCP_RESOURCE_DEFINITION_FIELDS,
     MCP_SERVER_DISCOVERED_COLUMNS,
     MCP_SERVER_OPERATOR_FIELDS,
     MCP_TOOL_DEFINITION_FIELDS,
@@ -84,8 +89,14 @@ class AIModelUIViewSet(NautobotUIViewSet):
                 section=SectionChoices.LEFT_HALF,
                 fields=list(AI_MODEL_FIELDS),
             ),
-            ObjectTextPanel(
+            ObjectFieldsPanel(
                 weight=200,
+                section=SectionChoices.RIGHT_HALF,
+                label="Capabilities",
+                fields=list(AI_MODEL_CAPABILITY_FIELDS),
+            ),
+            ObjectTextPanel(
+                weight=300,
                 section=SectionChoices.RIGHT_HALF,
                 label="Default Parameters",
                 object_field="default_parameters",
@@ -194,6 +205,24 @@ class MCPServerUIViewSet(NautobotUIViewSet):
                 related_field_name="mcp_server",
                 table_title="Tools",
             ),
+            ObjectsTablePanel(
+                weight=600,
+                section=SectionChoices.FULL_WIDTH,
+                table_class=tables.MCPResourceTable,
+                table_filter="mcp_server",
+                select_related_fields=["mcp_server"],
+                related_field_name="mcp_server",
+                table_title="Resources",
+            ),
+            ObjectsTablePanel(
+                weight=700,
+                section=SectionChoices.FULL_WIDTH,
+                table_class=tables.MCPPromptTable,
+                table_filter="mcp_server",
+                select_related_fields=["mcp_server"],
+                related_field_name="mcp_server",
+                table_title="Prompts",
+            ),
         ],
         extra_buttons=[
             RunDiscoveryButton(
@@ -202,7 +231,12 @@ class MCPServerUIViewSet(NautobotUIViewSet):
                 icon="mdi-radar",
                 color=ButtonColorChoices.BLUE,
                 link_includes_pk=False,
-                required_permissions=["extras.run_job", "nautobot_ai_models.change_mcptool"],
+                required_permissions=[
+                    "extras.run_job",
+                    "nautobot_ai_models.change_mcptool",
+                    "nautobot_ai_models.change_mcpresource",
+                    "nautobot_ai_models.change_mcpprompt",
+                ],
             ),
         ],
     )
@@ -240,6 +274,68 @@ class MCPToolUIViewSet(NautobotUIViewSet):
                 section=SectionChoices.RIGHT_HALF,
                 label="Output Schema",
                 object_field="output_schema",
+                render_as=ObjectTextPanel.RenderOptions.JSON,
+            ),
+        ],
+    )
+
+
+class MCPResourceUIViewSet(NautobotUIViewSet):
+    """ViewSet for MCP Resource views."""
+
+    bulk_update_form_class = forms.MCPResourceBulkEditForm
+    filterset_class = filters.MCPResourceFilterSet
+    filterset_form_class = forms.MCPResourceFilterForm
+    form_class = forms.MCPResourceForm
+    lookup_field = "pk"
+    queryset = models.MCPResource.objects.select_related("mcp_server")
+    serializer_class = serializers.MCPResourceSerializer
+    table_class = tables.MCPResourceTable
+
+    object_detail_content = ObjectDetailContent(
+        panels=[
+            ObjectFieldsPanel(
+                weight=100,
+                section=SectionChoices.LEFT_HALF,
+                label="MCP Resource",
+                fields=[*MCP_RESOURCE_DEFINITION_FIELDS, "last_seen_at", "definition_fingerprint"],
+            ),
+            ObjectTextPanel(
+                weight=200,
+                section=SectionChoices.RIGHT_HALF,
+                label="Advertised Annotations",
+                object_field="annotations",
+                render_as=ObjectTextPanel.RenderOptions.JSON,
+            ),
+        ],
+    )
+
+
+class MCPPromptUIViewSet(NautobotUIViewSet):
+    """ViewSet for MCP Prompt views."""
+
+    bulk_update_form_class = forms.MCPPromptBulkEditForm
+    filterset_class = filters.MCPPromptFilterSet
+    filterset_form_class = forms.MCPPromptFilterForm
+    form_class = forms.MCPPromptForm
+    lookup_field = "pk"
+    queryset = models.MCPPrompt.objects.select_related("mcp_server")
+    serializer_class = serializers.MCPPromptSerializer
+    table_class = tables.MCPPromptTable
+
+    object_detail_content = ObjectDetailContent(
+        panels=[
+            ObjectFieldsPanel(
+                weight=100,
+                section=SectionChoices.LEFT_HALF,
+                label="MCP Prompt",
+                fields=[*MCP_PROMPT_DEFINITION_FIELDS, "last_seen_at", "definition_fingerprint"],
+            ),
+            ObjectTextPanel(
+                weight=200,
+                section=SectionChoices.RIGHT_HALF,
+                label="Advertised Arguments",
+                object_field="arguments",
                 render_as=ObjectTextPanel.RenderOptions.JSON,
             ),
         ],
@@ -370,7 +466,7 @@ class AIAgentToolUIViewSet(NautobotUIViewSet):
     filterset_form_class = forms.AIAgentToolFilterForm
     form_class = forms.AIAgentToolForm
     lookup_field = "pk"
-    queryset = models.AIAgentTool.objects.select_related("agent", "mcp_tool__mcp_server", "ai_tool")
+    queryset = models.AIAgentTool.objects.for_list()
     serializer_class = serializers.AIAgentToolSerializer
     table_class = tables.AIAgentToolTable
 
@@ -386,10 +482,74 @@ class AIAgentToolUIViewSet(NautobotUIViewSet):
                 weight=200,
                 section=SectionChoices.RIGHT_HALF,
                 label="What the model is told",
-                fields=["wire_name", "wire_description", "writable", "fingerprint"],
+                fields=["wire_name", "wire_description", "writable", "fingerprint", "is_approved"],
+            ),
+            ObjectsTablePanel(
+                weight=300,
+                section=SectionChoices.FULL_WIDTH,
+                table_class=tables.AIToolApprovalTable,
+                table_filter="binding",
+                related_field_name="binding",
+                table_title="Approvals",
             ),
         ],
     )
+
+
+class AIToolApprovalUIViewSet(NautobotUIViewSet):
+    """ViewSet for AI Tool Approval views.
+
+    The reviewer and the digest are stamped here, not asked for on the form. A record of who
+    approved what is worth nothing when the person filling it in chooses both.
+    """
+
+    filterset_class = filters.AIToolApprovalFilterSet
+    filterset_form_class = forms.AIToolApprovalFilterForm
+    form_class = forms.AIToolApprovalForm
+    lookup_field = "pk"
+    queryset = models.AIToolApproval.objects.for_list()
+    serializer_class = serializers.AIToolApprovalSerializer
+    table_class = tables.AIToolApprovalTable
+
+    object_detail_content = ObjectDetailContent(
+        panels=[
+            ObjectFieldsPanel(
+                weight=100,
+                section=SectionChoices.LEFT_HALF,
+                label="Approval",
+                fields=list(AI_TOOL_APPROVAL_FIELDS),
+            ),
+            ObjectFieldsPanel(
+                weight=200,
+                section=SectionChoices.RIGHT_HALF,
+                label="Does it still answer",
+                fields=["is_current", "is_expired", "is_active"],
+            ),
+        ],
+    )
+
+    def form_save(self, form, **kwargs):
+        """Stamp the reviewer on a create, and stamp whoever withdraws it.
+
+        Both names are copied beside the foreign key, so a deleted account does not erase the
+        record of who decided.
+
+        Args:
+            form: The bound form.
+            **kwargs: Passed through to the base implementation.
+
+        Returns:
+            AIToolApproval: The saved record.
+        """
+        user = self.request.user
+        approval = form.instance
+        if not approval.present_in_database:
+            approval.approved_by = user
+            approval.approved_by_name = user.get_username()
+        elif approval.revoked_at is not None and approval.revoked_by_id is None:
+            approval.revoked_by = user
+            approval.revoked_by_name = user.get_username()
+        return super().form_save(form, **kwargs)
 
 
 class AIAgentSubagentUIViewSet(NautobotUIViewSet):
@@ -486,6 +646,42 @@ class AIAgentSkillUIViewSet(NautobotUIViewSet):
     )
 
 
+class AIUsageRecordUIViewSet(NautobotUIViewSet):
+    """ViewSet for AI Usage Record views.
+
+    Read and delete only, the same as the thread views and for the same reason: this app makes no
+    model call, so it has nothing to record. A consuming app writes these over the REST API.
+    """
+
+    unsupported_actions = ("create", "update", "bulk_create", "bulk_update", "bulk_rename")
+    action_buttons = ("export",)
+
+    filterset_class = filters.AIUsageRecordFilterSet
+    filterset_form_class = forms.AIUsageRecordFilterForm
+    lookup_field = "pk"
+    queryset = models.AIUsageRecord.objects.select_related("thread", "agent", "model__provider")
+    serializer_class = serializers.AIUsageRecordSerializer
+    table_class = tables.AIUsageRecordTable
+
+    object_detail_content = ObjectDetailContent(
+        panels=[
+            ObjectFieldsPanel(
+                weight=100,
+                section=SectionChoices.LEFT_HALF,
+                label="Usage",
+                fields=[*AI_USAGE_RECORD_FIELDS, "total_tokens", "total_cost"],
+            ),
+            ObjectTextPanel(
+                weight=200,
+                section=SectionChoices.RIGHT_HALF,
+                label="What the provider reported",
+                object_field="usage_payload",
+                render_as=ObjectTextPanel.RenderOptions.JSON,
+            ),
+        ],
+    )
+
+
 class AIAgentThreadUIViewSet(NautobotUIViewSet):
     """ViewSet for AI Agent Thread views.
 
@@ -522,6 +718,15 @@ class AIAgentThreadUIViewSet(NautobotUIViewSet):
                 label="Waiting on",
                 object_field="interrupt_payload",
                 render_as=ObjectTextPanel.RenderOptions.JSON,
+            ),
+            ObjectsTablePanel(
+                weight=300,
+                section=SectionChoices.FULL_WIDTH,
+                table_class=tables.AIUsageRecordTable,
+                table_filter="thread",
+                select_related_fields=["agent", "model"],
+                related_field_name="thread",
+                table_title="Usage",
             ),
         ],
     )

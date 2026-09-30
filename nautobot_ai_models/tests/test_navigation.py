@@ -84,10 +84,21 @@ class AIToolsNavigationTest(TestCase):
         """`docs/dev/extending.md` tells another app to take 400 or higher. Leave that true."""
         self.assertLess(AGENTS_GROUP_WEIGHT, 400)
 
-    def test_agents_group_holds_the_four_operator_pages(self):
-        """The three binding models are reached from an agent's page, not from the menu."""
+    def test_agents_group_holds_the_six_operator_pages(self):
+        """The three binding models are reached from an agent's page, not from the menu.
+
+        An approval is the exception. A reviewer looks for the queue of approvals, and does not
+        know which binding to open first.
+        """
         links = self.links_of(self.groups()["Agents"])
-        for view in ("aiagent_list", "aitool_list", "aiskill_list", "aiagentthread_list"):
+        for view in (
+            "aiagent_list",
+            "aitool_list",
+            "aiskill_list",
+            "aitoolapproval_list",
+            "aiagentthread_list",
+            "aiusagerecord_list",
+        ):
             self.assertIn(reverse(f"plugins:nautobot_ai_models:{view}"), links)
         for view in ("aiagenttool_list", "aiagentsubagent_list", "aiagentskill_list"):
             self.assertNotIn(reverse(f"plugins:nautobot_ai_models:{view}"), links)
@@ -97,6 +108,12 @@ class AIToolsNavigationTest(TestCase):
         links = self.links_of(self.groups()["AI Models"])
         self.assertIn(reverse("plugins:nautobot_ai_models:aiprovider_list"), links)
         self.assertIn(reverse("plugins:nautobot_ai_models:aimodel_list"), links)
+
+    def test_mcp_models_group_holds_all_four_pages(self):
+        """A server advertises three things, and each one has a page beside the server."""
+        links = self.links_of(self.groups()["MCP Models"])
+        for view in ("mcpserver_list", "mcptool_list", "mcpresource_list", "mcpprompt_list"):
+            self.assertIn(reverse(f"plugins:nautobot_ai_models:{view}"), links)
 
     def test_mcp_models_group_holds_both_models(self):
         """The MCP Models group lists the server and the tool."""

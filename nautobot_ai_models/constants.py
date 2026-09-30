@@ -13,6 +13,10 @@ COST_MAX_DIGITS = 12
 COST_DECIMAL_PLACES = 4
 MIN_COST = 0
 
+MIN_CONTEXT_WINDOW = 1
+
+MIN_MAX_OUTPUT_TOKENS = 1
+
 ADDRESSED_PROVIDER_TYPES = (
     AIProviderTypeChoices.OPENAI_COMPATIBLE,
     AIProviderTypeChoices.OLLAMA,
@@ -50,6 +54,14 @@ AI_MODEL_NUMERIC_FIELDS = (
     "temperature",
     "input_cost_per_million",
     "output_cost_per_million",
+)
+
+AI_MODEL_CAPABILITY_FIELDS = (
+    "context_window",
+    "max_output_tokens",
+    "supports_tools",
+    "supports_vision",
+    "supports_structured_output",
 )
 
 AI_MODEL_FIELDS = (*AI_MODEL_DEFAULT_COLUMNS, *AI_MODEL_NUMERIC_FIELDS)
@@ -92,6 +104,31 @@ MCP_TOOL_DEFINITION_FIELDS = (
 MCP_TOOL_SCHEMA_FIELDS = (
     "input_schema",
     "output_schema",
+)
+
+MCP_RESOURCE_DEFINITION_FIELDS = (
+    "mcp_server",
+    "uri",
+    "name",
+    "title",
+    "description",
+    "mime_type",
+    "is_template",
+    "size",
+    "enabled",
+)
+
+MCP_PROMPT_DEFINITION_FIELDS = (
+    "mcp_server",
+    "name",
+    "title",
+    "description",
+    "enabled",
+)
+
+MCP_DISCOVERY_STAMPS = (
+    "definition_fingerprint",
+    "last_seen_at",
 )
 
 AI_TOOLS_TAB_NAME = "AI Tools"
@@ -156,6 +193,25 @@ AI_AGENT_TOOL_FIELDS = (
     "weight",
 )
 
+AI_TOOL_APPROVAL_FIELDS = (
+    "binding",
+    "fingerprint",
+    "approved_by",
+    "approved_by_name",
+    "approved_at",
+    "expires_at",
+    "revoked_at",
+    "revoked_by",
+    "revoked_by_name",
+    "note",
+)
+
+AI_TOOL_APPROVAL_DECISION_FIELDS = (
+    "binding",
+    "expires_at",
+    "note",
+)
+
 AI_AGENT_SUBAGENT_FIELDS = (
     "parent",
     "subagent",
@@ -187,3 +243,18 @@ AI_AGENT_THREAD_FIELDS = (
 )
 
 AGENTS_GROUP_WEIGHT = 300
+
+AI_USAGE_RECORD_FIELDS = (
+    "thread",
+    "agent",
+    "model",
+    "recorded_at",
+    "input_tokens",
+    "output_tokens",
+    "cached_input_tokens",
+    "reasoning_tokens",
+    "input_cost",
+    "output_cost",
+)
+
+TOKENS_PER_MILLION = 1_000_000

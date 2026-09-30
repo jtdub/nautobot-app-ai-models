@@ -173,7 +173,7 @@ class DiscoverAIModelsTest(TransactionTestCase):
         self.assertFalse(any("secret" in message for message in messages))
 
 
-EMPTY_REPORT = mcp.DiscoveryReport()
+EMPTY_REPORT = mcp.ServerDiscoveryReport()
 
 
 class MCPServerDiscoveryJobTest(TransactionTestCase):
@@ -293,7 +293,9 @@ class MCPServerDiscoveryJobTest(TransactionTestCase):
         server = self.servers[0]
         added = models.MCPTool.objects.create(mcp_server=server, name="brand_new")
         changed = models.MCPTool.objects.create(mcp_server=server, name="moved_underneath_us")
-        discover.return_value = mcp.DiscoveryReport(added=(added,), definition_changed=(changed,))
+        discover.return_value = mcp.ServerDiscoveryReport(
+            tools=mcp.DiscoveryReport(added=(added,), definition_changed=(changed,))
+        )
 
         result = self._run(mcp_server=server.pk)
 

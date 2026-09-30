@@ -11,11 +11,16 @@ from nautobot_ai_models.constants import (
     AI_AGENT_SUBAGENT_FIELDS,
     AI_AGENT_THREAD_FIELDS,
     AI_AGENT_TOOL_FIELDS,
+    AI_MODEL_CAPABILITY_FIELDS,
     AI_MODEL_DEFAULT_COLUMNS,
     AI_MODEL_FIELDS,
     AI_SKILL_FIELDS,
+    AI_TOOL_APPROVAL_FIELDS,
     AI_TOOL_DEFINITION_FIELDS,
     AI_TOOL_FIELDS,
+    AI_USAGE_RECORD_FIELDS,
+    MCP_PROMPT_DEFINITION_FIELDS,
+    MCP_RESOURCE_DEFINITION_FIELDS,
     MCP_SERVER_DISCOVERED_COLUMNS,
     MCP_SERVER_OPERATOR_FIELDS,
     MCP_TOOL_DEFINITION_FIELDS,
@@ -80,16 +85,23 @@ class AIModelTable(BaseTable):
     provider = tables.Column(linkify=True, verbose_name="AI Provider")
     kind = tables.Column(verbose_name="Kind")
     enabled = BooleanColumn()
+    supports_tools = BooleanColumn(verbose_name="Tools")
+    supports_vision = BooleanColumn(verbose_name="Vision")
+    supports_structured_output = BooleanColumn(verbose_name="Structured output")
     actions = ButtonsColumn(
         models.AIModel,
         pk_field="pk",
     )
 
     class Meta(BaseTable.Meta):
-        """Meta attributes."""
+        """Meta attributes.
+
+        The capability columns are available and off by default. They answer a question an
+        operator asks now and then, and a list of every model is already wide.
+        """
 
         model = models.AIModel
-        fields = ("pk", *AI_MODEL_FIELDS, "default_parameters", "actions")
+        fields = ("pk", *AI_MODEL_FIELDS, *AI_MODEL_CAPABILITY_FIELDS, "default_parameters", "actions")
         default_columns = ("pk", *AI_MODEL_DEFAULT_COLUMNS, "actions")
 
 
@@ -149,6 +161,49 @@ class MCPToolTable(BaseTable):
             "last_seen_at",
             "actions",
         )
+
+
+MCP_RESOURCE_COLUMNS = (*MCP_RESOURCE_DEFINITION_FIELDS, "last_seen_at")
+
+MCP_PROMPT_COLUMNS = (*MCP_PROMPT_DEFINITION_FIELDS, "last_seen_at")
+
+
+class MCPResourceTable(BaseTable):
+    # pylint: disable=R0903
+    """Table for the MCP Resource list view, and for the panel on a server's page."""
+
+    pk = ToggleColumn()
+    uri = tables.Column(linkify=True, verbose_name="URI")
+    mcp_server = tables.Column(linkify=True, verbose_name="MCP Server")
+    mime_type = tables.Column(verbose_name="MIME Type")
+    is_template = BooleanColumn(verbose_name="Template")
+    enabled = BooleanColumn()
+    actions = ButtonsColumn(models.MCPResource, pk_field="pk")
+
+    class Meta(BaseTable.Meta):
+        """Meta attributes."""
+
+        model = models.MCPResource
+        fields = ("pk", *MCP_RESOURCE_COLUMNS, "annotations", "definition_fingerprint", "actions")
+        default_columns = ("pk", "uri", "mcp_server", "name", "mime_type", "is_template", "enabled", "actions")
+
+
+class MCPPromptTable(BaseTable):
+    # pylint: disable=R0903
+    """Table for the MCP Prompt list view, and for the panel on a server's page."""
+
+    pk = ToggleColumn()
+    name = tables.Column(linkify=True)
+    mcp_server = tables.Column(linkify=True, verbose_name="MCP Server")
+    enabled = BooleanColumn()
+    actions = ButtonsColumn(models.MCPPrompt, pk_field="pk")
+
+    class Meta(BaseTable.Meta):
+        """Meta attributes."""
+
+        model = models.MCPPrompt
+        fields = ("pk", *MCP_PROMPT_COLUMNS, "arguments", "definition_fingerprint", "actions")
+        default_columns = ("pk", "name", "mcp_server", "description", "enabled", "last_seen_at", "actions")
 
 
 class AIToolTable(BaseTable):
@@ -214,14 +269,36 @@ class AIAgentToolTable(BaseTable):
     ai_tool = tables.Column(linkify=True, verbose_name="AI Tool")
     wire_name = tables.Column(verbose_name="Called as", orderable=False)
     writable = BooleanColumn(orderable=False)
+    is_approved = BooleanColumn(verbose_name="Approved", orderable=False)
     actions = ButtonsColumn(models.AIAgentTool, pk_field="pk")
 
     class Meta(BaseTable.Meta):
         """Meta attributes."""
 
         model = models.AIAgentTool
-        fields = ("pk", *AI_AGENT_TOOL_FIELDS, "wire_name", "writable", "actions")
-        default_columns = ("pk", "agent", "wire_name", "writable", "weight", "actions")
+        fields = ("pk", *AI_AGENT_TOOL_FIELDS, "wire_name", "writable", "is_approved", "actions")
+        default_columns = ("pk", "agent", "wire_name", "writable", "is_approved", "weight", "actions")
+
+
+class AIToolApprovalTable(BaseTable):
+    # pylint: disable=R0903
+    """Table for the AI Tool Approval list view, and for the panel on a binding's page."""
+
+    pk = ToggleColumn()
+    binding = tables.Column(linkify=True, verbose_name="AI Agent Tool")
+    approved_at = tables.DateTimeColumn(verbose_name="Approved")
+    approved_by_name = tables.Column(verbose_name="Approved By")
+    expires_at = tables.DateTimeColumn(verbose_name="Expires")
+    revoked_at = tables.DateTimeColumn(verbose_name="Revoked")
+    is_active = BooleanColumn(verbose_name="Active", orderable=False)
+    actions = ButtonsColumn(models.AIToolApproval, pk_field="pk")
+
+    class Meta(BaseTable.Meta):
+        """Meta attributes."""
+
+        model = models.AIToolApproval
+        fields = ("pk", *AI_TOOL_APPROVAL_FIELDS, "is_active", "actions")
+        default_columns = ("pk", "binding", "approved_at", "approved_by_name", "is_active", "actions")
 
 
 class AIAgentSubagentTable(BaseTable):
@@ -280,6 +357,36 @@ class AIAgentSkillTable(BaseTable):
         model = models.AIAgentSkill
         fields = ("pk", *AI_AGENT_SKILL_FIELDS, "actions")
         default_columns = ("pk", "agent", "skill", "weight", "actions")
+
+
+class AIUsageRecordTable(BaseTable):
+    # pylint: disable=R0903
+    """Table for the AI Usage Record list view, and for the panel on a thread's page."""
+
+    pk = ToggleColumn()
+    recorded_at = tables.DateTimeColumn(linkify=True, verbose_name="Recorded")
+    thread = tables.Column(linkify=True, verbose_name="Thread")
+    agent = tables.Column(linkify=True, verbose_name="AI Agent")
+    model = tables.Column(linkify=True, verbose_name="AI Model")
+    total_tokens = tables.Column(verbose_name="Total Tokens", orderable=False)
+    total_cost = tables.Column(verbose_name="Total Cost", orderable=False)
+    actions = ButtonsColumn(models.AIUsageRecord, pk_field="pk", buttons=("delete",))
+
+    class Meta(BaseTable.Meta):
+        """Meta attributes."""
+
+        model = models.AIUsageRecord
+        fields = ("pk", *AI_USAGE_RECORD_FIELDS, "total_tokens", "total_cost", "actions")
+        default_columns = (
+            "pk",
+            "recorded_at",
+            "agent",
+            "model",
+            "input_tokens",
+            "output_tokens",
+            "total_cost",
+            "actions",
+        )
 
 
 class AIAgentThreadTable(BaseTable):

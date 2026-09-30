@@ -26,7 +26,17 @@ class AIModelsConfig(NautobotAppConfig):
         "checkpoint_retention_days": 30,
     }
     docs_view_name = "plugins:nautobot_ai_models:docs"
-    searchable_models = ["aiprovider", "aimodel", "mcpserver", "mcptool", "aiagent", "aitool", "aiskill"]
+    searchable_models = [
+        "aiprovider",
+        "aimodel",
+        "mcpserver",
+        "mcptool",
+        "mcpresource",
+        "mcpprompt",
+        "aiagent",
+        "aitool",
+        "aiskill",
+    ]
 
     nautobot_edition = "community"
 

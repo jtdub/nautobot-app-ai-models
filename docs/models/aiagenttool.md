@@ -36,9 +36,18 @@ them.
 | `wire_description` | The override, or the description of the tool. |
 | `writable` | Read from the tool. Never stored twice. |
 | `fingerprint` | The definition digest of the tool. |
+| `is_approved` | Whether an [AI Tool Approval](aitoolapproval.md) still answers for this digest. |
 
 The gate of a consuming app reads the last two. Because they resolve through the binding, no tool
 source can arrive without answering them.
+
+## Approval
+
+`fingerprint` exists so that an approval can be checked against it. The approval itself is an
+[AI Tool Approval](aitoolapproval.md) row, and `is_approved` reads it.
+
+The app records the answer and enforces nothing. A consuming app reads `is_approved` before it
+wires its caller, and the same app owns the gate that a call passes through.
 
 ## Two tools can share a name
 

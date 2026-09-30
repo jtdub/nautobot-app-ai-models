@@ -118,7 +118,11 @@ def expired_threads(*, days=None):
 
 
 def prune(*, days=None, delete_rows=True):
-    """Delete the checkpoints of every expired thread, and optionally the thread rows.
+    """Delete the checkpoints and the usage of every expired thread, and optionally the thread rows.
+
+    The usage records go whether or not ``delete_rows`` is set. Usage is state, and the cascade
+    from the thread only fires when the thread itself goes. Without this a ``delete_rows=False``
+    run would leave every usage record forever.
 
     Args:
         days: Override the configured window.
@@ -126,14 +130,20 @@ def prune(*, days=None, delete_rows=True):
             drops only the state, which is what a deployment that reports on agent activity wants.
 
     Returns:
-        dict: `threads` pruned, and `rows` deleted across the checkpoint tables.
+        dict: `threads` pruned, `rows` deleted across the checkpoint tables, and `usage` records
+            deleted.
     """
+    from nautobot_ai_models.services import usage  # pylint: disable=import-outside-toplevel
+
+    expired = expired_threads(days=days)
+    usage_deleted = usage.delete_for_threads(expired)
+
     threads, rows = 0, 0
     tables = _existing_tables()
-    for thread in expired_threads(days=days).iterator():
+    for thread in expired.iterator():
         rows += sum(delete_thread(thread.thread_id, tables=tables).values())
         threads += 1
         if delete_rows:
             thread.delete()
-    logger.info("Pruned %s thread(s) and %s checkpoint row(s).", threads, rows)
-    return {"threads": threads, "rows": rows}
+    logger.info("Pruned %s thread(s), %s checkpoint row(s) and %s usage record(s).", threads, rows, usage_deleted)
+    return {"threads": threads, "rows": rows, "usage": usage_deleted}

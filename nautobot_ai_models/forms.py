@@ -37,7 +37,10 @@ from nautobot_ai_models.constants import (
     AI_AGENT_SKILL_FIELDS,
     AI_AGENT_SUBAGENT_FIELDS,
     AI_AGENT_TOOL_FIELDS,
+    AI_MODEL_CAPABILITY_FIELDS,
     AI_SKILL_FIELDS,
+    MCP_PROMPT_DEFINITION_FIELDS,
+    MCP_RESOURCE_DEFINITION_FIELDS,
     MCP_SERVER_OPERATOR_FIELDS,
     MCP_TOOL_DEFINITION_FIELDS,
     MCP_TOOL_SCHEMA_FIELDS,
@@ -170,6 +173,15 @@ class AIModelBulkEditForm(NautobotBulkEditForm):  # pylint: disable=too-many-anc
     temperature = forms.DecimalField(required=False)
     input_cost_per_million = forms.DecimalField(required=False, label="Input cost per million tokens")
     output_cost_per_million = forms.DecimalField(required=False, label="Output cost per million tokens")
+    context_window = forms.IntegerField(required=False, label="Context window")
+    max_output_tokens = forms.IntegerField(required=False, label="Max output tokens")
+    supports_tools = forms.NullBooleanField(required=False, widget=_boolean_select(), label="Supports tools")
+    supports_vision = forms.NullBooleanField(required=False, widget=_boolean_select(), label="Supports vision")
+    supports_structured_output = forms.NullBooleanField(
+        required=False,
+        widget=_boolean_select(),
+        label="Supports structured output",
+    )
 
     class Meta:
         """Meta attributes."""
@@ -180,6 +192,7 @@ class AIModelBulkEditForm(NautobotBulkEditForm):  # pylint: disable=too-many-anc
             "temperature",
             "input_cost_per_million",
             "output_cost_per_million",
+            *AI_MODEL_CAPABILITY_FIELDS,
         ]
 
 
@@ -187,7 +200,7 @@ class AIModelFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancesto
     """Filter form to filter searches."""
 
     model = models.AIModel
-    field_order = ["q", "name", "provider", "kind", "enabled"]
+    field_order = ["q", "name", "provider", "kind", "enabled", "supports_tools"]
 
     q = forms.CharField(
         required=False,
@@ -202,6 +215,7 @@ class AIModelFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancesto
     )
     kind = forms.MultipleChoiceField(choices=AIModelKindChoices, required=False, widget=StaticSelect2Multiple)
     enabled = forms.NullBooleanField(required=False, widget=_boolean_select())
+    supports_tools = forms.NullBooleanField(required=False, widget=_boolean_select(), label="Supports tools")
 
 
 class MCPServerForm(NautobotModelForm):  # pylint: disable=too-many-ancestors
@@ -323,6 +337,100 @@ class MCPToolFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancesto
         label="Advertised read only",
         widget=_boolean_select(),
     )
+
+
+class MCPResourceForm(NautobotModelForm):  # pylint: disable=too-many-ancestors
+    """MCPResource creation and edit form.
+
+    A person edits these rows as well as discovery, because Nautobot cannot discover a stdio
+    server.
+    """
+
+    mcp_server = DynamicModelChoiceField(queryset=models.MCPServer.objects.all(), label="MCP Server")
+
+    class Meta:
+        """Meta attributes."""
+
+        model = models.MCPResource
+        fields = [*MCP_RESOURCE_DEFINITION_FIELDS, "annotations"]  # pylint: disable=nb-use-fields-all
+
+
+class MCPResourceBulkEditForm(NautobotBulkEditForm):  # pylint: disable=too-many-ancestors
+    """MCPResource bulk edit form."""
+
+    pk = forms.ModelMultipleChoiceField(queryset=models.MCPResource.objects.all(), widget=forms.MultipleHiddenInput)
+    title = forms.CharField(required=False, max_length=CHARFIELD_MAX_LENGTH)
+    description = forms.CharField(required=False, widget=forms.Textarea)
+    mime_type = forms.CharField(required=False, max_length=CHARFIELD_MAX_LENGTH, label="MIME type")
+    enabled = forms.NullBooleanField(required=False, widget=_boolean_select())
+
+    class Meta:
+        """Meta attributes."""
+
+        nullable_fields = ["title", "description", "mime_type"]
+
+
+class MCPResourceFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancestors
+    """Filter form to filter searches."""
+
+    model = models.MCPResource
+    field_order = ["q", "mcp_server", "uri", "is_template", "enabled"]
+
+    q = forms.CharField(required=False, label="Search", help_text="Search within the URI, the name and the title.")
+    mcp_server = DynamicModelMultipleChoiceField(
+        queryset=models.MCPServer.objects.all(),
+        required=False,
+        label="MCP Server",
+    )
+    uri = forms.CharField(required=False, label="URI")
+    is_template = forms.NullBooleanField(required=False, widget=_boolean_select(), label="Is a template")
+    enabled = forms.NullBooleanField(required=False, widget=_boolean_select())
+
+
+class MCPPromptForm(NautobotModelForm):  # pylint: disable=too-many-ancestors
+    """MCPPrompt creation and edit form.
+
+    A person edits these rows as well as discovery, because Nautobot cannot discover a stdio
+    server.
+    """
+
+    mcp_server = DynamicModelChoiceField(queryset=models.MCPServer.objects.all(), label="MCP Server")
+
+    class Meta:
+        """Meta attributes."""
+
+        model = models.MCPPrompt
+        fields = [*MCP_PROMPT_DEFINITION_FIELDS, "arguments"]  # pylint: disable=nb-use-fields-all
+
+
+class MCPPromptBulkEditForm(NautobotBulkEditForm):  # pylint: disable=too-many-ancestors
+    """MCPPrompt bulk edit form."""
+
+    pk = forms.ModelMultipleChoiceField(queryset=models.MCPPrompt.objects.all(), widget=forms.MultipleHiddenInput)
+    title = forms.CharField(required=False, max_length=CHARFIELD_MAX_LENGTH)
+    description = forms.CharField(required=False, widget=forms.Textarea)
+    enabled = forms.NullBooleanField(required=False, widget=_boolean_select())
+
+    class Meta:
+        """Meta attributes."""
+
+        nullable_fields = ["title", "description"]
+
+
+class MCPPromptFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancestors
+    """Filter form to filter searches."""
+
+    model = models.MCPPrompt
+    field_order = ["q", "mcp_server", "name", "enabled"]
+
+    q = forms.CharField(required=False, label="Search", help_text="Search within the name and the title.")
+    mcp_server = DynamicModelMultipleChoiceField(
+        queryset=models.MCPServer.objects.all(),
+        required=False,
+        label="MCP Server",
+    )
+    name = forms.CharField(required=False, label="Name")
+    enabled = forms.NullBooleanField(required=False, widget=_boolean_select())
 
 
 class AIToolForm(NautobotModelForm):  # pylint: disable=too-many-ancestors
@@ -486,6 +594,60 @@ class AIAgentToolFilterForm(NautobotFilterForm):  # pylint: disable=too-many-anc
     ai_tool = DynamicModelMultipleChoiceField(queryset=models.AITool.objects.all(), required=False, label="AI Tool")
 
 
+class AIToolApprovalForm(NautobotModelForm):  # pylint: disable=too-many-ancestors
+    """Record that a person accepted what a binding offers.
+
+    The form asks for the binding, an optional expiry, and a note. It never asks for the digest or
+    the reviewer: the record would then say whatever the person typed, which is not a record.
+    """
+
+    binding = DynamicModelChoiceField(queryset=models.AIAgentTool.objects.all(), label="AI Agent Tool")
+    expires_at = forms.DateTimeField(
+        required=False,
+        label="Expires at",
+        help_text="Leave it empty for an approval that does not expire on its own.",
+    )
+    revoked_at = forms.DateTimeField(
+        required=False,
+        label="Revoked at",
+        help_text="Fill this in to withdraw the approval. The record stays.",
+    )
+
+    class Meta:
+        """Meta attributes."""
+
+        model = models.AIToolApproval
+        fields = ["binding", "expires_at", "revoked_at", "note"]  # pylint: disable=nb-use-fields-all
+
+    def __init__(self, *args, **kwargs):
+        """Lock the binding once the row exists.
+
+        An approval names one binding. Moving it would carry a review across to a definition
+        nobody looked at.
+        """
+        super().__init__(*args, **kwargs)
+        if self.instance is not None and self.instance.present_in_database:
+            self.fields["binding"].disabled = True
+
+
+class AIToolApprovalFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancestors
+    """Filtering approvals."""
+
+    model = models.AIToolApproval
+    field_order = ["q", "agent", "binding", "is_revoked"]
+
+    q = forms.CharField(
+        required=False, label="Search", help_text="Search within the agent, the reviewer, and the note."
+    )
+    agent = DynamicModelMultipleChoiceField(queryset=models.AIAgent.objects.all(), required=False, label="AI Agent")
+    binding = DynamicModelMultipleChoiceField(
+        queryset=models.AIAgentTool.objects.all(),
+        required=False,
+        label="AI Agent Tool",
+    )
+    is_revoked = forms.NullBooleanField(required=False, widget=_boolean_select(), label="Withdrawn")
+
+
 class AIAgentSubagentForm(NautobotModelForm):  # pylint: disable=too-many-ancestors
     """Binding one specialist to one supervisor."""
 
@@ -601,6 +763,25 @@ class AIAgentSkillFilterForm(NautobotFilterForm):  # pylint: disable=too-many-an
     q = forms.CharField(required=False, label="Search", help_text="Search within the agent's or the skill's name.")
     agent = DynamicModelMultipleChoiceField(queryset=models.AIAgent.objects.all(), required=False, label="AI Agent")
     skill = DynamicModelMultipleChoiceField(queryset=models.AISkill.objects.all(), required=False, label="AI Skill")
+
+
+class AIUsageRecordFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancestors
+    """Filtering usage records. There is no create or edit form: a person does not type a token count."""
+
+    model = models.AIUsageRecord
+    field_order = ["agent", "model", "thread"]
+
+    agent = DynamicModelMultipleChoiceField(queryset=models.AIAgent.objects.all(), required=False, label="AI Agent")
+    model_field = DynamicModelMultipleChoiceField(
+        queryset=models.AIModel.objects.all(),
+        required=False,
+        label="AI Model",
+    )
+    thread = DynamicModelMultipleChoiceField(
+        queryset=models.AIAgentThread.objects.all(),
+        required=False,
+        label="AI Agent Thread",
+    )
 
 
 class AIAgentThreadFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancestors

@@ -1,0 +1,1 @@
+The generate_nautobot_ai_models_test_data command no longer fails on --flush when an agent is bound to an MCP tool.

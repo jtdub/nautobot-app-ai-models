@@ -49,6 +49,28 @@ mcp_model_items = (
         ),
     ),
     NavMenuItem(
+        link="plugins:nautobot_ai_models:mcpresource_list",
+        name="MCP Resources",
+        permissions=["nautobot_ai_models.view_mcpresource"],
+        buttons=(
+            NavMenuAddButton(
+                link="plugins:nautobot_ai_models:mcpresource_add",
+                permissions=["nautobot_ai_models.add_mcpresource"],
+            ),
+        ),
+    ),
+    NavMenuItem(
+        link="plugins:nautobot_ai_models:mcpprompt_list",
+        name="MCP Prompts",
+        permissions=["nautobot_ai_models.view_mcpprompt"],
+        buttons=(
+            NavMenuAddButton(
+                link="plugins:nautobot_ai_models:mcpprompt_add",
+                permissions=["nautobot_ai_models.add_mcpprompt"],
+            ),
+        ),
+    ),
+    NavMenuItem(
         link="plugins:nautobot_ai_models:mcptool_list",
         name="MCP Tools",
         permissions=["nautobot_ai_models.view_mcptool"],
@@ -90,9 +112,25 @@ agent_items = (
         ),
     ),
     NavMenuItem(
+        link="plugins:nautobot_ai_models:aitoolapproval_list",
+        name="Tool Approvals",
+        permissions=["nautobot_ai_models.view_aitoolapproval"],
+        buttons=(
+            NavMenuAddButton(
+                link="plugins:nautobot_ai_models:aitoolapproval_add",
+                permissions=["nautobot_ai_models.add_aitoolapproval"],
+            ),
+        ),
+    ),
+    NavMenuItem(
         link="plugins:nautobot_ai_models:aiagentthread_list",
         name="Agent Threads",
         permissions=["nautobot_ai_models.view_aiagentthread"],
+    ),
+    NavMenuItem(
+        link="plugins:nautobot_ai_models:aiusagerecord_list",
+        name="Usage",
+        permissions=["nautobot_ai_models.view_aiusagerecord"],
     ),
 )
 

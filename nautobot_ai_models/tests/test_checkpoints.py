@@ -16,7 +16,7 @@ from nautobot.apps.testing import TestCase
 
 from nautobot_ai_models.choices import AIAgentThreadStatusChoices
 from nautobot_ai_models.constants import DEFAULT_CHECKPOINT_RETENTION_DAYS
-from nautobot_ai_models.models import AIAgentThread
+from nautobot_ai_models.models import AIAgentThread, AIUsageRecord
 from nautobot_ai_models.services import checkpoints
 from nautobot_ai_models.tests import fixtures
 
@@ -220,6 +220,18 @@ class RetentionTest(TestCase):
 
         self.assertGreater(result["threads"], 0)
         self.assertEqual(AIAgentThread.objects.count(), before)
+
+    def test_pruning_drops_the_usage_even_when_it_keeps_the_record(self):
+        """Usage is state. The cascade only fires when the thread goes, so this cannot rely on it."""
+        fixtures.create_aiusagerecord()
+        fixtures.age_agent_threads()
+        expired = list(checkpoints.expired_threads(days=1))
+        self.assertTrue(AIUsageRecord.objects.filter(thread__in=expired).exists())
+
+        result = checkpoints.prune(days=1, delete_rows=False)
+
+        self.assertGreater(result["usage"], 0)
+        self.assertFalse(AIUsageRecord.objects.filter(thread__in=expired).exists())
 
     def test_pruning_can_delete_the_record_too(self):
         """The default, for a deployment that wants the space back."""

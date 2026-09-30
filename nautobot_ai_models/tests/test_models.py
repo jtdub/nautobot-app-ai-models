@@ -1,11 +1,13 @@
 """Test the registry models."""
 
 import json
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db.models import ProtectedError
 from django.db.utils import IntegrityError
+from django.utils import timezone
 from nautobot.apps.testing import ModelTestCases, TestCase
 from nautobot.extras.models import ExternalIntegration, GitRepository
 
@@ -18,6 +20,7 @@ from nautobot_ai_models.choices import (
     AIToolKindChoices,
     SubagentInputModeChoices,
 )
+from nautobot_ai_models.services import usage
 from nautobot_ai_models.tests import fixtures
 
 
@@ -214,6 +217,43 @@ class TestAIModel(ModelTestCases.BaseModelTestCase):
         provider = models.AIProvider.objects.get(name="Test One")
         provider.delete()
         self.assertEqual(models.AIModel.objects.filter(name="Test One").count(), 0)
+
+    def test_a_capability_starts_unrecorded(self):
+        """An empty column is not a no. Nobody has answered the question yet."""
+        provider = models.AIProvider.objects.get(name="Test One")
+        ai_model = models.AIModel.objects.create(provider=provider, name="fresh-model")
+        self.assertIsNone(ai_model.context_window)
+        self.assertIsNone(ai_model.max_output_tokens)
+        self.assertIsNone(ai_model.supports_tools)
+        self.assertIsNone(ai_model.supports_vision)
+        self.assertIsNone(ai_model.supports_structured_output)
+
+    def test_an_answer_larger_than_the_context_window_is_refused(self):
+        """The context window holds the prompt as well, so the answer cannot fill it twice."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        ai_model.context_window = 8192
+        ai_model.max_output_tokens = 16384
+        with self.assertRaises(ValidationError) as raised:
+            ai_model.validated_save()
+        self.assertIn("max_output_tokens", raised.exception.message_dict)
+
+    def test_a_token_limit_above_the_model_ceiling_is_refused(self):
+        """A limit the model cannot meet is a typo, and it fails at run time instead."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        ai_model.max_output_tokens = 4096
+        ai_model.num_predict = 8192
+        with self.assertRaises(ValidationError) as raised:
+            ai_model.validated_save()
+        self.assertIn("num_predict", raised.exception.message_dict)
+
+    def test_an_unlimited_token_limit_passes_the_ceiling(self):
+        """-1 means unlimited, and the provider applies its own ceiling."""
+        ai_model = models.AIModel.objects.get(name="Test One")
+        ai_model.max_output_tokens = 4096
+        ai_model.num_predict = -1
+        ai_model.validated_save()
+        ai_model.refresh_from_db()
+        self.assertEqual(ai_model.num_predict, -1)
 
 
 class TestAIModelParameters(TestCase):
@@ -418,6 +458,96 @@ class TestMCPTool(ModelTestCases.BaseModelTestCase):
         self.assertFalse(tool.is_available)
 
 
+class TestMCPResource(ModelTestCases.BaseModelTestCase):
+    """Test MCPResource."""
+
+    model = models.MCPResource
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the MCPResource model."""
+        super().setUpTestData()
+        fixtures.create_mcpresource()
+
+    def test_str_names_the_server(self):
+        """One URI can exist under two servers, so the server has to be in the label."""
+        resource = models.MCPResource.objects.filter(name="inventory").first()
+        self.assertTrue(str(resource).startswith(resource.mcp_server.name))
+
+    def test_the_uri_is_unique_per_server_not_globally(self):
+        """Two servers can offer the same URI, and they are two records."""
+        self.assertEqual(models.MCPResource.objects.filter(uri="nautobot://devices/inventory").count(), 2)
+
+    def test_the_natural_key_is_the_server_and_the_uri(self):
+        """The name is not the key: the specification does not promise it is unique."""
+        self.assertEqual(models.MCPResource.natural_key_field_names, ["mcp_server", "uri"])
+
+    def test_a_template_records_that_its_uri_has_parameters(self):
+        """A template URI is not one a client can read directly."""
+        template = models.MCPResource.objects.get(is_template=True)
+        self.assertIn("{", template.uri)
+
+    def test_is_available_follows_the_server(self):
+        """One question replaces two, the same as for a tool."""
+        resource = models.MCPResource.objects.first()
+        self.assertTrue(resource.is_available)
+        server = resource.mcp_server
+        server.enabled = False
+        server.validated_save()
+        resource.refresh_from_db()
+        self.assertTrue(resource.enabled)
+        self.assertFalse(resource.is_available)
+
+    def test_deleting_a_server_deletes_its_resources(self):
+        """A resource cannot outlive the server that offers it."""
+        server = models.MCPResource.objects.first().mcp_server
+        server.delete()
+        self.assertEqual(models.MCPResource.objects.filter(mcp_server_id=server.pk).count(), 0)
+
+
+class TestMCPPrompt(ModelTestCases.BaseModelTestCase):
+    """Test MCPPrompt."""
+
+    model = models.MCPPrompt
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the MCPPrompt model."""
+        super().setUpTestData()
+        fixtures.create_mcpprompt()
+
+    def test_name_is_unique_per_server_not_globally(self):
+        """Two servers can offer a prompt of one name."""
+        self.assertEqual(models.MCPPrompt.objects.filter(name="triage_device").count(), 2)
+
+    def test_the_arguments_are_a_list_not_a_schema(self):
+        """The protocol sends a list here, so a caller cannot treat it as a JSON Schema."""
+        prompt = models.MCPPrompt.objects.get(name="summarise_site")
+        self.assertIsInstance(prompt.arguments, list)
+
+    def test_required_arguments_names_only_the_required_ones(self):
+        """A reviewer wants the ones a caller has to supply."""
+        prompt = next(each for each in models.MCPPrompt.objects.filter(name="triage_device") if each.arguments)
+        self.assertEqual(prompt.required_arguments, ("hostname",))
+        optional = models.MCPPrompt.objects.get(name="summarise_site")
+        self.assertEqual(optional.required_arguments, ())
+
+    def test_required_arguments_survives_a_column_that_is_not_a_list(self):
+        """A fixture or a direct write can put anything here, and a list view must not break."""
+        prompt = models.MCPPrompt.objects.first()
+        prompt.arguments = {"not": "a list"}
+        self.assertEqual(prompt.required_arguments, ())
+
+    def test_is_available_follows_the_server(self):
+        """One question replaces two."""
+        prompt = models.MCPPrompt.objects.first()
+        server = prompt.mcp_server
+        server.enabled = False
+        server.validated_save()
+        prompt.refresh_from_db()
+        self.assertFalse(prompt.is_available)
+
+
 class TestAITool(ModelTestCases.BaseModelTestCase):
     """Test AITool."""
 
@@ -532,6 +662,39 @@ class TestAIAgent(ModelTestCases.BaseModelTestCase):
         )
         agent.full_clean()
 
+    def test_a_model_that_cannot_call_a_tool_is_refused_for_an_agent_with_tools(self):
+        """The build fails at run time otherwise, and nothing says why beforehand."""
+        agent = fixtures.create_aiagenttool()[0].agent
+        agent.model.supports_tools = False
+        agent.model.validated_save()
+        with self.assertRaises(ValidationError) as raised:
+            agent.full_clean()
+        self.assertIn("model", raised.exception.message_dict)
+
+    def test_a_model_that_cannot_call_a_tool_is_refused_for_a_supervisor(self):
+        """A supervisor reaches a specialist as a tool, so the same rule applies."""
+        agent = fixtures.create_aiagentsubagent()[0].parent
+        agent.model.supports_tools = False
+        agent.model.validated_save()
+        with self.assertRaises(ValidationError) as raised:
+            agent.full_clean()
+        self.assertIn("model", raised.exception.message_dict)
+
+    def test_an_unrecorded_tool_capability_does_not_refuse(self):
+        """Nobody has answered the question. An empty column is not a no."""
+        agent = fixtures.create_aiagenttool()[0].agent
+        self.assertIsNone(agent.model.supports_tools)
+        agent.full_clean()
+
+    def test_a_model_that_cannot_call_a_tool_suits_an_agent_with_none(self):
+        """An agent that only answers needs no tool, so the capability does not matter."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        self.assertFalse(agent.tool_bindings.exists())
+        self.assertFalse(agent.subagent_bindings.exists())
+        agent.model.supports_tools = False
+        agent.model.validated_save()
+        agent.full_clean()
+
     def test_temperature_resolves_agent_then_model_then_provider(self):
         """One more level on the chain AIModel already has."""
         agent = models.AIAgent.objects.get(name="Test Supervisor")
@@ -643,6 +806,103 @@ class TestAIAgentTool(ModelTestCases.BaseModelTestCase):
             binding.ai_tool.delete()  # pylint: disable=no-member
 
 
+class TestAIToolApproval(ModelTestCases.BaseModelTestCase):
+    """Test AIToolApproval."""
+
+    model = models.AIToolApproval
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AIToolApproval model."""
+        super().setUpTestData()
+        fixtures.create_aitoolapproval()
+
+    def _binding_without_an_approval(self):
+        """Return one binding that nobody has approved yet."""
+        bindings = fixtures.create_aiagenttool()
+        return next(binding for binding in bindings if not binding.approvals.exists())
+
+    def test_a_create_takes_the_digest_from_the_binding(self):
+        """A reviewer accepts what is on offer, and does not type a digest."""
+        binding = self._binding_without_an_approval()
+        approval = models.AIToolApproval(binding=binding)
+        approval.validated_save()
+        self.assertEqual(approval.fingerprint, binding.fingerprint)
+
+    def test_a_digest_the_binding_does_not_offer_is_refused(self):
+        """An approval of something else answers a question nobody asked."""
+        binding = self._binding_without_an_approval()
+        approval = models.AIToolApproval(binding=binding, fingerprint="0" * 64)
+        with self.assertRaises(ValidationError) as raised:
+            approval.validated_save()
+        self.assertIn("fingerprint", raised.exception.message_dict)
+
+    def test_the_binding_cannot_be_moved_afterwards(self):
+        """Moving it would carry a review across to a definition nobody looked at."""
+        approval = models.AIToolApproval.objects.filter(revoked_at__isnull=True).first()
+        approval.binding = self._binding_without_an_approval()
+        with self.assertRaises(ValidationError):
+            approval.validated_save()
+
+    def test_an_expiry_before_the_approval_is_refused(self):
+        """An approval cannot lapse before it is given."""
+        binding = self._binding_without_an_approval()
+        approval = models.AIToolApproval(binding=binding, expires_at=timezone.now() - timedelta(days=1))
+        with self.assertRaises(ValidationError) as raised:
+            approval.validated_save()
+        self.assertIn("expires_at", raised.exception.message_dict)
+
+    def test_a_standing_approval_answers_for_the_binding(self):
+        """The digest still matches, and nobody withdrew it."""
+        approval = models.AIToolApproval.objects.filter(revoked_at__isnull=True, expires_at__isnull=True).first()
+        self.assertTrue(approval.is_current)
+        self.assertFalse(approval.is_expired)
+        self.assertTrue(approval.is_active)
+        self.assertTrue(approval.binding.is_approved)
+
+    def test_a_withdrawn_approval_answers_nothing(self):
+        """The row stays, because the review still happened."""
+        approval = models.AIToolApproval.objects.filter(revoked_at__isnull=False).first()
+        self.assertTrue(approval.is_current)
+        self.assertFalse(approval.is_active)
+        self.assertFalse(approval.binding.is_approved)
+
+    def test_an_expired_approval_answers_nothing(self):
+        """A quarterly review that nobody renewed stops standing."""
+        approval = models.AIToolApproval.objects.filter(expires_at__isnull=False).first()
+        self.assertTrue(approval.is_expired)
+        self.assertFalse(approval.is_active)
+        self.assertFalse(approval.binding.is_approved)
+
+    def test_a_moved_definition_ends_the_approval(self):
+        """This is the point of the digest. A rewritten description needs a new review."""
+        approval = models.AIToolApproval.objects.filter(revoked_at__isnull=True, expires_at__isnull=True).first()
+        binding = approval.binding
+        self.assertTrue(binding.is_approved)
+
+        binding.description_override = "Something the reviewer never read."
+        binding.validated_save()
+
+        binding.refresh_from_db()
+        self.assertFalse(binding.is_approved)
+        self.assertFalse(binding.approvals.first().is_current)
+
+    def test_a_binding_can_be_approved_again_after_a_withdrawal(self):
+        """A withdrawal is not a ban. There is no uniqueness constraint in the way."""
+        approval = models.AIToolApproval.objects.filter(revoked_at__isnull=False).first()
+        binding = approval.binding
+        again = models.AIToolApproval(binding=binding)
+        again.validated_save()
+        self.assertTrue(binding.is_approved)
+        self.assertEqual(binding.approvals.count(), 2)
+
+    def test_deleting_a_binding_deletes_its_approvals(self):
+        """An orphan approval has no digest to be checked against."""
+        approval = models.AIToolApproval.objects.first()
+        approval.binding.delete()
+        self.assertFalse(models.AIToolApproval.objects.filter(pk=approval.pk).exists())
+
+
 class TestAIAgentSubagent(ModelTestCases.BaseModelTestCase):
     """Test AIAgentSubagent."""
 
@@ -732,6 +992,76 @@ class TestAIAgentSkill(ModelTestCases.BaseModelTestCase):
         binding = models.AIAgentSkill.objects.first()
         with self.assertRaises(IntegrityError):
             models.AIAgentSkill.objects.create(agent=binding.agent, skill=binding.skill)
+
+
+class TestAIUsageRecord(TestCase):
+    """Test AIUsageRecord.
+
+    A plain `TestCase`: the model is a `BaseModel`, so the generic model suite's change-log and
+    custom-field checks have nothing to check.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AIUsageRecord model."""
+        fixtures.create_aiusagerecord()
+
+    def test_the_cost_is_frozen_at_the_price_of_the_day(self):
+        """A vendor changing its price must not reprice last quarter."""
+        record = models.AIUsageRecord.objects.filter(input_cost__isnull=False).first()
+        was = record.input_cost
+
+        ai_model = record.model
+        ai_model.input_cost_per_million = "99.0000"
+        ai_model.validated_save()
+
+        record.refresh_from_db()
+        self.assertEqual(record.input_cost, was)
+
+    def test_the_cost_follows_the_price_and_the_token_count(self):
+        """A million tokens costs the recorded price, so 1200 costs a thousandth of it."""
+        threads = fixtures.create_aiagentthread()
+        ai_model = models.AIModel.objects.filter(kind=AIModelKindChoices.CHAT).first()
+        ai_model.input_cost_per_million = "10.0000"
+        ai_model.output_cost_per_million = "30.0000"
+        ai_model.validated_save()
+
+        record = usage.record(threads[0], threads[0].agent, ai_model, input_tokens=500_000, output_tokens=100_000)
+        self.assertEqual(record.input_cost, Decimal("5.0000"))
+        self.assertEqual(record.output_cost, Decimal("3.0000"))
+        self.assertEqual(record.total_cost, Decimal("8.0000"))
+
+    def test_an_unpriced_model_records_no_cost(self):
+        """Empty means nobody recorded a price. It does not mean free."""
+        record = models.AIUsageRecord.objects.filter(input_cost__isnull=True).first()
+        self.assertIsNone(record.input_cost)
+        self.assertIsNone(record.total_cost)
+        self.assertGreater(record.total_tokens, 0)
+
+    def test_total_tokens_is_not_stored(self):
+        """The provider's own figure is in the payload, and it does not always equal the sum."""
+        record = models.AIUsageRecord.objects.first()
+        self.assertEqual(record.total_tokens, record.input_tokens + record.output_tokens)
+
+    def test_a_subagent_call_is_attributed_to_the_subagent(self):
+        """The model actually called is not always the thread agent's model."""
+        threads = fixtures.create_aiagentthread()
+        specialist = models.AIAgent.objects.exclude(pk=threads[0].agent_id).first()
+        record = usage.record(threads[0], specialist, specialist.model, input_tokens=10)
+        self.assertEqual(record.agent, specialist)
+        self.assertNotEqual(record.agent, threads[0].agent)
+
+    def test_deleting_a_thread_deletes_its_usage(self):
+        """Retention deletes threads, and PROTECT here would make that Job fail."""
+        thread = models.AIUsageRecord.objects.first().thread
+        thread.delete()
+        self.assertEqual(models.AIUsageRecord.objects.filter(thread_id=thread.pk).count(), 0)
+
+    def test_the_model_is_protected_while_a_record_names_it(self):
+        """A model cannot be deleted out from under its own cost history."""
+        record = models.AIUsageRecord.objects.first()
+        with self.assertRaises(ProtectedError):
+            record.model.delete()
 
 
 class TestAIAgentThread(ModelTestCases.BaseModelTestCase):

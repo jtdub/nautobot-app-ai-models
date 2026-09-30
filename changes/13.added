@@ -1,0 +1,3 @@
+Added MCP Resources and MCP Prompts under AI Tools. An MCP server advertises three things, and only tools had a page.
+Added AI Tool Approvals under AI Tools, where you record that a person accepted what a tool binding offers. The record stops answering as soon as the definition moves.
+Added Usage under AI Tools. Post to /api/plugins/ai-models/ai-usage-records/ after a run, and the app freezes the cost at the price of the day.
