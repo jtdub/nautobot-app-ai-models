@@ -311,7 +311,7 @@ class AIAgentToolAPIViewTest(APIViewTestCases.APIViewTestCase):
         self.add_permissions("nautobot_ai_models.view_aiagenttool")
         response = self.client.get(self._get_detail_url(binding), **self.header)
         self.assertHttpStatus(response, 200)
-        for key in ("wire_name", "wire_description", "writable", "fingerprint"):
+        for key in ("wire_name", "wire_description", "writable", "fingerprint", "mcp_kind"):
             self.assertIn(key, response.data)
 
 

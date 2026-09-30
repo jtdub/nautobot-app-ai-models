@@ -160,6 +160,7 @@ class AIAgentToolSerializer(NautobotModelSerializer):  # pylint: disable=too-man
     writable = drf_serializers.BooleanField(read_only=True)
     fingerprint = drf_serializers.CharField(read_only=True)
     is_approved = drf_serializers.BooleanField(read_only=True)
+    mcp_kind = drf_serializers.CharField(read_only=True)
 
     class Meta:
         """Meta attributes."""

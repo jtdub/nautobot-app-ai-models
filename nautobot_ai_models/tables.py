@@ -267,6 +267,8 @@ class AIAgentToolTable(BaseTable):
     agent = tables.Column(linkify=True, verbose_name="AI Agent")
     mcp_tool = tables.Column(linkify=True, verbose_name="MCP Tool")
     ai_tool = tables.Column(linkify=True, verbose_name="AI Tool")
+    mcp_prompt = tables.Column(linkify=True, verbose_name="MCP Prompt")
+    mcp_resource = tables.Column(linkify=True, verbose_name="MCP Resource")
     wire_name = tables.Column(verbose_name="Called as", orderable=False)
     writable = BooleanColumn(orderable=False)
     is_approved = BooleanColumn(verbose_name="Approved", orderable=False)

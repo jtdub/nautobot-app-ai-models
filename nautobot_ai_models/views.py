@@ -307,6 +307,21 @@ class MCPResourceUIViewSet(NautobotUIViewSet):
                 object_field="annotations",
                 render_as=ObjectTextPanel.RenderOptions.JSON,
             ),
+            ObjectsTablePanel(
+                weight=300,
+                section=SectionChoices.FULL_WIDTH,
+                table_class=tables.AIAgentToolTable,
+                table_filter="mcp_resource",
+                select_related_fields=[
+                    "agent",
+                    "ai_tool",
+                    "mcp_tool__mcp_server",
+                    "mcp_prompt__mcp_server",
+                    "mcp_resource__mcp_server",
+                ],
+                related_field_name="mcp_resource",
+                table_title="Agents that may use this",
+            ),
         ],
     )
 
@@ -337,6 +352,21 @@ class MCPPromptUIViewSet(NautobotUIViewSet):
                 label="Advertised Arguments",
                 object_field="arguments",
                 render_as=ObjectTextPanel.RenderOptions.JSON,
+            ),
+            ObjectsTablePanel(
+                weight=300,
+                section=SectionChoices.FULL_WIDTH,
+                table_class=tables.AIAgentToolTable,
+                table_filter="mcp_prompt",
+                select_related_fields=[
+                    "agent",
+                    "ai_tool",
+                    "mcp_tool__mcp_server",
+                    "mcp_prompt__mcp_server",
+                    "mcp_resource__mcp_server",
+                ],
+                related_field_name="mcp_prompt",
+                table_title="Agents that may use this",
             ),
         ],
     )
