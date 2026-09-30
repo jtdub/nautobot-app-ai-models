@@ -1,3 +1,4 @@
+---
 # sdlc-crew configuration. The sdlc-setup skill writes this file for you.
 # You can also edit it by hand. Every key has a default, so you can delete a key
 # that you do not need.
@@ -9,7 +10,7 @@ version: 1
 #   some         - explain uncommon terms only
 #   professional - assume a software developer
 person:
-  experience: professional
+  experience: "professional"
 
 # Where the work items live.
 #   local     - a BACKLOG.md file in this repository (no account needed)
@@ -18,7 +19,7 @@ person:
 #   jira      - Jira Cloud or Jira Server; tracker.url and tracker.project are required
 #   bitbucket - Bitbucket Cloud issues of the repository in forge.repo
 tracker:
-  kind: github
+  kind: "github"
   url: ""
   project: ""
   statuses:
@@ -32,7 +33,7 @@ tracker:
 #   github | gitlab | bitbucket | none
 # With none, the workflow makes branches and commits but opens no pull request.
 forge:
-  kind: github
+  kind: "github"
   repo: "jtdub/nautobot-app-ai-models"
   default_branch: "develop"
   branch_pattern: "sdlc/{id}-{slug}"
@@ -44,17 +45,17 @@ forge:
 #   build  - the engineer
 #   review - QA, UX, and the sdlc-review skill
 models:
-  plan: inherit
-  build: inherit
-  review: inherit
+  plan: "inherit"
+  build: "inherit"
+  review: "inherit"
 
 # How to run and test the project. Leave a value empty if the project has none yet.
 project:
   run_command: "invoke start"
   test_command: "invoke unittest"
   app_url: "http://localhost:8080"
-  changelog: towncrier
-  screenshots: pr-comment
+  changelog: "towncrier"
+  screenshots: "pr-comment"
 
 # Limits that keep a change reviewable.
 limits:
