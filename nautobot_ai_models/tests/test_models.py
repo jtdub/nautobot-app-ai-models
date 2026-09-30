@@ -24,6 +24,23 @@ from nautobot_ai_models.services import usage
 from nautobot_ai_models.tests import fixtures
 
 
+def _spare_agent(name):
+    """Create an agent with no tool bindings, so every target pair is free.
+
+    Args:
+        name: The agent's name.
+
+    Returns:
+        AIAgent: The saved agent.
+    """
+    return models.AIAgent.objects.create(
+        name=name,
+        description=f"{name}. Give it a hostname.",
+        system_prompt="You answer from tools only.",
+        model=models.AIModel.objects.filter(kind=AIModelKindChoices.CHAT).first(),
+    )
+
+
 class TestAIProvider(ModelTestCases.BaseModelTestCase):
     """Test AIProvider."""
 
@@ -504,6 +521,23 @@ class TestMCPResource(ModelTestCases.BaseModelTestCase):
         server.delete()
         self.assertEqual(models.MCPResource.objects.filter(mcp_server_id=server.pk).count(), 0)
 
+    def test_argument_schema_lists_the_template_variables(self):
+        """Each RFC 6570 variable in a template URI is one string property."""
+        resource = models.MCPResource.objects.get(uri="nautobot://sites/{site_code}")
+        self.assertEqual(
+            resource.argument_schema,
+            {"type": "object", "properties": {"site_code": {"type": "string"}}},
+        )
+
+    def test_argument_schema_is_empty_for_a_plain_resource(self):
+        """A plain URI has no parameters for a caller to fill."""
+        resource = models.MCPResource.objects.filter(uri="nautobot://devices/inventory").first()
+        self.assertEqual(resource.argument_schema, {})
+
+    def test_writable_is_false(self):
+        """A resource is read by protocol, so nothing a call writes."""
+        self.assertFalse(models.MCPResource.objects.first().writable)
+
 
 class TestMCPPrompt(ModelTestCases.BaseModelTestCase):
     """Test MCPPrompt."""
@@ -546,6 +580,30 @@ class TestMCPPrompt(ModelTestCases.BaseModelTestCase):
         server.validated_save()
         prompt.refresh_from_db()
         self.assertFalse(prompt.is_available)
+
+    def test_argument_schema_builds_from_the_arguments(self):
+        """The schema is what a caller needs, not the list the protocol sent."""
+        prompt = models.MCPPrompt.objects.filter(name="triage_device").first()
+        self.assertEqual(
+            prompt.argument_schema,
+            {
+                "type": "object",
+                "properties": {"hostname": {"type": "string", "description": "The device name."}},
+                "required": ["hostname"],
+            },
+        )
+
+    def test_argument_schema_leaves_an_optional_argument_out_of_required(self):
+        """Only the marked-required arguments go into `required`."""
+        prompt = models.MCPPrompt.objects.get(name="summarise_site")
+        self.assertEqual(
+            prompt.argument_schema,
+            {"type": "object", "properties": {"site_code": {"type": "string"}}},
+        )
+
+    def test_writable_is_false(self):
+        """A prompt is content chosen by a person, not a write."""
+        self.assertFalse(models.MCPPrompt.objects.first().writable)
 
 
 class TestAITool(ModelTestCases.BaseModelTestCase):
@@ -804,6 +862,106 @@ class TestAIAgentTool(ModelTestCases.BaseModelTestCase):
         binding = models.AIAgentTool.objects.filter(ai_tool__isnull=False).first()
         with self.assertRaises(ProtectedError):
             binding.ai_tool.delete()  # pylint: disable=no-member
+
+    def test_a_binding_names_exactly_one_of_four_targets(self):
+        """A prompt or a resource is a target, and two targets are still one too many."""
+        agent = _spare_agent("Four Targets Agent")
+        prompt = fixtures.create_mcpprompt()[0]
+        resource = fixtures.create_mcpresource()[0]
+
+        models.AIAgentTool(agent=agent, mcp_prompt=prompt).full_clean()
+        models.AIAgentTool(agent=agent, mcp_resource=resource).full_clean()
+
+        with self.assertRaises(ValidationError):
+            models.AIAgentTool(agent=agent, mcp_prompt=prompt, mcp_resource=resource).full_clean()
+        with self.assertRaises(ValidationError):
+            models.AIAgentTool(
+                agent=agent,
+                mcp_tool=models.MCPTool.objects.first(),
+                mcp_prompt=prompt,
+            ).full_clean()
+
+    def test_target_returns_the_prompt_or_the_resource(self):
+        """Whatever kind the binding names, `target` answers every question."""
+        agent = _spare_agent("Target Agent")
+        prompt = fixtures.create_mcpprompt()[0]
+        resource = fixtures.create_mcpresource()[0]
+        prompt_binding = models.AIAgentTool(agent=agent, mcp_prompt=prompt)
+        resource_binding = models.AIAgentTool(agent=agent, mcp_resource=resource)
+
+        self.assertIs(prompt_binding.target, prompt)
+        self.assertIs(resource_binding.target, resource)
+
+    def test_mcp_kind_reports_which_mcp_call_to_make(self):
+        """A consuming app reads this to pick tool, prompt, resource, or none."""
+        agent = _spare_agent("MCP Kind Agent")
+        mcp_tool = models.MCPTool.objects.first()
+        ai_tool = models.AITool.objects.first()
+        prompt = fixtures.create_mcpprompt()[0]
+        resource = fixtures.create_mcpresource()[0]
+
+        self.assertEqual(
+            models.AIAgentTool.objects.create(agent=agent, mcp_tool=mcp_tool).mcp_kind,
+            "tool",
+        )
+        self.assertIsNone(
+            models.AIAgentTool.objects.create(agent=agent, ai_tool=ai_tool).mcp_kind
+        )
+        self.assertEqual(
+            models.AIAgentTool.objects.create(agent=agent, mcp_prompt=prompt).mcp_kind,
+            "prompt",
+        )
+        self.assertEqual(
+            models.AIAgentTool.objects.create(agent=agent, mcp_resource=resource).mcp_kind,
+            "resource",
+        )
+
+    def test_a_resource_binding_with_a_blank_name_and_override_is_refused(self):
+        """Without a name the model could not say which resource it meant."""
+        agent = _spare_agent("Blank Resource Agent")
+        resource = fixtures.create_mcpresource()[0]
+        resource.name = ""
+        binding = models.AIAgentTool(agent=agent, mcp_resource=resource)
+
+        with self.assertRaises(ValidationError):
+            binding.full_clean()
+
+        binding.name_override = "inventory"
+        binding.full_clean()
+
+    def test_a_prompt_or_resource_binding_is_read_only(self):
+        """Neither changes anything, so an approval can never approve a write."""
+        agent = _spare_agent("Read Only Agent")
+        prompt_binding = models.AIAgentTool(agent=agent, mcp_prompt=fixtures.create_mcpprompt()[0])
+        resource_binding = models.AIAgentTool(agent=agent, mcp_resource=fixtures.create_mcpresource()[0])
+
+        self.assertFalse(prompt_binding.writable)
+        self.assertFalse(resource_binding.writable)
+
+    def test_a_bound_prompt_is_protected_from_delete(self):
+        """A prompt an agent is bound to is not tidied away by accident."""
+        agent = _spare_agent("Protected Prompt Agent")
+        prompt = fixtures.create_mcpprompt()[0]
+        models.AIAgentTool.objects.create(agent=agent, mcp_prompt=prompt)
+
+        with self.assertRaises(ProtectedError):
+            prompt.delete()
+
+    def test_the_fingerprint_moves_when_prompt_arguments_change(self):
+        """An approval must not survive a definition that changed under it."""
+        agent = _spare_agent("Fingerprint Agent")
+        prompt = fixtures.create_mcpprompt()[0]
+        binding = models.AIAgentTool.objects.create(agent=agent, mcp_prompt=prompt)
+        before = binding.fingerprint
+
+        prompt.arguments = [
+            {"name": "hostname", "description": "The device name.", "required": True},
+            {"name": "timeout", "required": False},
+        ]
+        prompt.save()
+
+        binding = models.AIAgentTool.objects.get(pk=binding.pk)
+        self.assertNotEqual(binding.fingerprint, before)
 
 
 class TestAIToolApproval(ModelTestCases.BaseModelTestCase):

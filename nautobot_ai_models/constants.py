@@ -188,6 +188,8 @@ AI_AGENT_TOOL_FIELDS = (
     "agent",
     "mcp_tool",
     "ai_tool",
+    "mcp_prompt",
+    "mcp_resource",
     "name_override",
     "description_override",
     "weight",

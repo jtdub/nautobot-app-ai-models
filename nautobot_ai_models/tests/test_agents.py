@@ -17,7 +17,7 @@ from nautobot.apps.testing import TestCase
 from nautobot.extras.models import Job
 
 from nautobot_ai_models.choices import AIProviderTypeChoices, MCPTransportChoices
-from nautobot_ai_models.models import AIAgent, AIAgentTool, AITool
+from nautobot_ai_models.models import AIAgent, AIAgentTool, AITool, MCPPrompt, MCPResource
 from nautobot_ai_models.services import agents
 from nautobot_ai_models.tests import fixtures
 
@@ -203,6 +203,33 @@ class MCPBindingsTest(TestCase):
         with self.assertRaises(agents.AgentBuildError) as raised:
             agents.mcp_bindings(agent)
         self.assertIn("stdio", str(raised.exception))
+
+    def test_prompt_and_resource_bindings_are_returned_with_the_tools(self):
+        """A prompt or a resource is another MCP kind the consuming app has to build."""
+        agent = AIAgent.objects.get(name="Test Skills Agent")
+        fixtures.create_mcpprompt()
+        fixtures.create_mcpresource()
+        AIAgentTool.objects.create(agent=agent, mcp_prompt=MCPPrompt.objects.first())
+        AIAgentTool.objects.create(agent=agent, mcp_resource=MCPResource.objects.first())
+
+        bindings = agents.mcp_bindings(agent)
+        self.assertEqual({binding.mcp_kind for binding in bindings.values()}, {"prompt", "resource"})
+        for binding in bindings.values():
+            self.assertIsNotNone(binding.target.mcp_server_id)
+
+    def test_resolve_tools_leaves_out_every_mcp_kind(self):
+        """A prompt or resource binding is skipped, never crashed on."""
+        agent = AIAgent.objects.get(name="Test Skills Agent")
+        fixtures.create_mcpprompt()
+        fixtures.create_mcpresource()
+        AIAgentTool.objects.create(agent=agent, mcp_prompt=MCPPrompt.objects.first())
+        AIAgentTool.objects.create(agent=agent, mcp_resource=MCPResource.objects.first())
+
+        def tool(name, description=None):  # pylint: disable=unused-argument
+            return lambda func: func
+
+        with mock.patch.object(agents, "require_langchain", return_value=(None, tool)):
+            self.assertEqual(agents.resolve_tools(agent), [])
 
 
 class RefusalTest(TestCase):
