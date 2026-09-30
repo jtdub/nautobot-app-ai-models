@@ -305,6 +305,7 @@ class AIToolApprovalFilterSet(NautobotFilterSet):  # pylint: disable=too-many-an
     )
     binding = NaturalKeyOrPKMultipleChoiceFilter(
         queryset=models.AIAgentTool.objects.all(),
+        to_field_name="pk",
         label="AI Agent Tool",
     )
     agent = NaturalKeyOrPKMultipleChoiceFilter(

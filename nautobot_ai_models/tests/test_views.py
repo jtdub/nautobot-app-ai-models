@@ -371,7 +371,7 @@ class AIToolApprovalViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
         fixtures.create_aitoolapproval()
         spare = [binding for binding in models.AIAgentTool.objects.all() if not binding.approvals.exists()]
         cls.form_data = {"binding": spare[0].pk, "note": "Approved through the form."}
-        cls.update_data = {"binding": spare[0].pk, "note": "Renewed after a second read."}
+        cls.update_data = {"note": "Renewed after a second read."}
 
 
 class AIUsageRecordViewTest(
