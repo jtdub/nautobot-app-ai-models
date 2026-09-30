@@ -42,6 +42,17 @@ is free text.
 A template row holds its `uriTemplate` in the same column, and sets `is_template`. The two lists
 live in one table because they are one kind of thing to a reviewer.
 
+## Binding one to an agent
+
+A resource is content that an application puts in front of a model, so a person decides which
+agents may use which resources. That decision is an [AI Agent Tool](aiagenttool.md) target:
+`AIAgentTool.mcp_resource` names the resource, `mcp_kind` returns `resource`, and the app's detail
+page shows the agents that may use it. A resource with no `name` needs a `name_override` on the
+binding, or the model could not say which resource it meant.
+
+`AIAgentTool.writable` is `False` for a resource binding, because `resources/read` reads by
+protocol.
+
 ## Discovery
 
 The **MCP Server Discovery** Job writes these rows. It reads `resources/list` and

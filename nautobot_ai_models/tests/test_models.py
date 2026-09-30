@@ -904,9 +904,7 @@ class TestAIAgentTool(ModelTestCases.BaseModelTestCase):
             models.AIAgentTool.objects.create(agent=agent, mcp_tool=mcp_tool).mcp_kind,
             "tool",
         )
-        self.assertIsNone(
-            models.AIAgentTool.objects.create(agent=agent, ai_tool=ai_tool).mcp_kind
-        )
+        self.assertIsNone(models.AIAgentTool.objects.create(agent=agent, ai_tool=ai_tool).mcp_kind)
         self.assertEqual(
             models.AIAgentTool.objects.create(agent=agent, mcp_prompt=prompt).mcp_kind,
             "prompt",

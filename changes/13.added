@@ -1,0 +1,1 @@
+Added MCP Prompt and MCP Resource as targets an agent can bind, beside the MCP Tool and the AI Tool. A binding names one of the four, and the API returns which kind via `mcp_kind`.

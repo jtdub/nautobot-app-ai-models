@@ -5,8 +5,9 @@
 
 One prompt template that an [MCP Server](mcpserver.md) advertises.
 
-A prompt is a template that a person selects. The model does not choose it. This is why there is
-no binding from an [AI Agent](aiagent.md) to a prompt.
+A prompt is a template that a person selects. The model does not choose it. There is no binding
+table from an [AI Agent](aiagent.md) to a prompt; when an agent must choose one for itself, that is
+a target on [AI Agent Tool](aiagenttool.md).
 
 ## Fields
 
@@ -35,14 +36,16 @@ prompt.required_arguments
 
 That gives the names the server marked required, in the order it gave them.
 
-## Why there is no binding to an agent
+## Binding one to an agent
 
 An [AI Agent Tool](aiagenttool.md) exists because the name and the description a model reads decide
-whether it calls the tool, and a bad pair fails in silence. An operator has to be able to correct
-that on the binding. No such pressure applies to a prompt that a person picks from a list.
+whether it calls a tool, and a bad pair fails in silence. An operator has to be able to correct
+that on the binding.
 
-If a consuming app later needs an agent to select a prompt for itself, that is a tool. The right
-change is a third target on `AIAgentTool`, not a second binding table.
+A prompt that a person picks from a list has no such pressure, so there is no binding table. When
+a consuming app needs an agent to select a prompt for itself, that is a target on `AIAgentTool`
+beside the MCP tool and the AI tool, not a second binding table. `AIAgentTool.mcp_kind` returns
+`prompt` for such a binding, and the app's detail page shows the agents that may use this prompt.
 
 ## Discovery
 
