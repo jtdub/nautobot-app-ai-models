@@ -10,12 +10,20 @@ these rows into a LangChain agent, and even that module only builds the agent.
 import uuid
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 from nautobot.apps.constants import CHARFIELD_MAX_LENGTH
-from nautobot.apps.models import OrganizationalModel, PrimaryModel, extras_features
+from nautobot.apps.models import (
+    BaseManager,
+    BaseModel,
+    OrganizationalModel,
+    PrimaryModel,
+    RestrictedQuerySet,
+    extras_features,
+)
 
 from nautobot_ai_models.choices import (
     AIAgentPatternChoices,
@@ -34,8 +42,10 @@ from nautobot_ai_models.constants import (
     DEFAULT_BINDING_WEIGHT,
     DEFAULT_MAX_ITERATIONS,
     MAX_TEMPERATURE,
+    MIN_CONTEXT_WINDOW,
     MIN_COST,
     MIN_MAX_ITERATIONS,
+    MIN_MAX_OUTPUT_TOKENS,
     MIN_NUM_PREDICT,
     MIN_TEMPERATURE,
     TEMPERATURE_DECIMAL_PLACES,
@@ -240,6 +250,45 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
             "which host answers. The contents of extra_body are passed through unchecked."
         ),
     )
+    context_window = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(MIN_CONTEXT_WINDOW)],
+        verbose_name="Context window",
+        help_text=(
+            "How many tokens the model accepts in one call, the prompt and the answer together. "
+            "Empty means nobody has recorded it, which is not the same as unlimited."
+        ),
+    )
+    max_output_tokens = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(MIN_MAX_OUTPUT_TOKENS)],
+        verbose_name="Max output tokens",
+        help_text="The most tokens the model returns in one answer. This is the ceiling on num_predict.",
+    )
+    supports_tools = models.BooleanField(
+        null=True,
+        blank=True,
+        verbose_name="Supports tools",
+        help_text=(
+            "Whether the model can call a tool. Unset means nobody has recorded it. Discovery "
+            "cannot learn this from GET /v1/models, and an agent on a model that cannot call a "
+            "tool fails at run time with nothing to read beforehand."
+        ),
+    )
+    supports_vision = models.BooleanField(
+        null=True,
+        blank=True,
+        verbose_name="Supports vision",
+        help_text="Whether the model accepts an image in a message. Unset means nobody has recorded it.",
+    )
+    supports_structured_output = models.BooleanField(
+        null=True,
+        blank=True,
+        verbose_name="Supports structured output",
+        help_text="Whether the model answers to a JSON Schema. Unset means nobody has recorded it.",
+    )
 
     class Meta:
         """Meta class.
@@ -272,7 +321,9 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
 
         Raises:
             ValidationError: The value is not a mapping, a key is not in
-                ``ALLOWED_MODEL_PARAMETERS``, or the temperature is not a number in range.
+                ``ALLOWED_MODEL_PARAMETERS``, the temperature is not a number in range, the
+                answer is larger than the context window, or ``num_predict`` asks for more tokens
+                than ``max_output_tokens`` allows.
         """
         super().clean()
 
@@ -305,6 +356,34 @@ class AIModel(OrganizationalModel):  # pylint: disable=too-many-ancestors
                         )
                     }
                 )
+
+        if (
+            self.context_window is not None
+            and self.max_output_tokens is not None
+            and self.max_output_tokens > self.context_window
+        ):
+            raise ValidationError(
+                {
+                    "max_output_tokens": (
+                        f"The answer cannot be larger than the context window of "
+                        f"{self.context_window} tokens, which holds the prompt as well."
+                    )
+                }
+            )
+
+        if (
+            self.max_output_tokens is not None
+            and self.num_predict is not None
+            and self.num_predict > self.max_output_tokens
+        ):
+            raise ValidationError(
+                {
+                    "num_predict": (
+                        f"This model returns at most {self.max_output_tokens} tokens, so a limit of "
+                        f"{self.num_predict} asks for more than it can give."
+                    )
+                }
+            )
 
     @property
     def is_available(self):
@@ -598,6 +677,231 @@ class MCPTool(OrganizationalModel):  # pylint: disable=too-many-ancestors
 
 
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
+class MCPResource(OrganizationalModel):  # pylint: disable=too-many-ancestors
+    """One resource an MCP server advertises.
+
+    A resource is content, not an action. ``resources/read`` reads, so there is no ``writable``
+    column and no ``advertised_read_only`` column here. The asymmetry with :class:`MCPTool` is a
+    decision, not an omission.
+
+    CAUTION: A resource is still text that enters a prompt. ``enabled`` is the lever, and
+    ``definition_fingerprint`` still moves when the server rewrites the description.
+    """
+
+    is_dynamic_group_associable_model = False
+
+    mcp_server = models.ForeignKey(
+        to=MCPServer,
+        on_delete=models.CASCADE,
+        related_name="resources",
+        help_text="A resource cannot outlive the server that offers it.",
+    )
+    uri = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        help_text=(
+            "The identifier a client reads the resource by. Unique within its server. This holds "
+            "the RFC 6570 template when the row is a template."
+        ),
+    )
+    name = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        help_text=(
+            "The name the server gave it. Not the uniqueness key: the specification does not "
+            "promise that two resources have different names."
+        ),
+    )
+    title = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        help_text="The human-readable name the server offered for display, if it offered one.",
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="What the resource holds, as the server advertised it.",
+    )
+    mime_type = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        verbose_name="MIME type",
+        help_text="The content type the server advertised, if it advertised one.",
+    )
+    is_template = models.BooleanField(
+        default=False,
+        verbose_name="Is a template",
+        help_text=(
+            "Whether the URI is a template with parameters in it. A template row comes from "
+            "resources/templates/list, and a plain row from resources/list."
+        ),
+    )
+    size = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+        help_text="The size in bytes the server advertised, if it advertised one.",
+    )
+    annotations = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "The annotations object the server advertised, stored whole. Shown so a reviewer can "
+            "see it. It decides nothing, the same as a tool's readOnlyHint."
+        ),
+    )
+    enabled = models.BooleanField(
+        default=True,
+        help_text=(
+            "Whether this resource is offered to apps reading this registry. Set by a person. "
+            "Discovery only ever clears it, and only for a resource the server stopped advertising."
+        ),
+    )
+    definition_fingerprint = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        help_text=(
+            "Digest of everything the server advertised about this resource as of the last "
+            "discovery. A consuming app compares it to detect that the contract moved."
+        ),
+    )
+    last_seen_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When discovery last saw this resource advertised.",
+    )
+
+    natural_key_field_names = ["mcp_server", "uri"]
+
+    class Meta:
+        """Meta class."""
+
+        ordering = ["mcp_server__name", "uri"]
+        verbose_name = "MCP Resource"
+        verbose_name_plural = "MCP Resources"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["mcp_server", "uri"],
+                name="nautobot_ai_models_mcpresource_unique_server_uri",
+            ),
+        ]
+
+    def __str__(self):
+        """Stringify instance."""
+        return f"{self.mcp_server.name}: {self.name or self.uri}"
+
+    @property
+    def is_available(self):
+        """Whether the registry offers this resource at all.
+
+        Returns:
+            bool: True when the resource and its server are both enabled.
+        """
+        return self.enabled and self.mcp_server.enabled
+
+
+@extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
+class MCPPrompt(OrganizationalModel):  # pylint: disable=too-many-ancestors
+    """One prompt template an MCP server advertises.
+
+    A prompt is chosen by a person, not by a model, so there is no binding to an agent here. When
+    an agent has to choose one for itself, that is a tool, and it belongs on
+    :class:`AIAgentTool` as a third target rather than in a second binding table.
+    """
+
+    is_dynamic_group_associable_model = False
+
+    mcp_server = models.ForeignKey(
+        to=MCPServer,
+        on_delete=models.CASCADE,
+        related_name="prompts",
+        help_text="A prompt cannot outlive the server that offers it.",
+    )
+    name = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        help_text="The prompt name sent on the wire. Unique within its server, and case sensitive.",
+    )
+    title = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        help_text="The human-readable name the server offered for display, if it offered one.",
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="What the prompt is for, as the server advertised it.",
+    )
+    arguments = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "The arguments the server advertised, as a JSON list. A list and not an object, "
+            "because the protocol sends a list here rather than a JSON Schema."
+        ),
+    )
+    enabled = models.BooleanField(
+        default=True,
+        help_text=(
+            "Whether this prompt is offered to apps reading this registry. Set by a person. "
+            "Discovery only ever clears it, and only for a prompt the server stopped advertising."
+        ),
+    )
+    definition_fingerprint = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        help_text=(
+            "Digest of everything the server advertised about this prompt as of the last "
+            "discovery. A consuming app compares it to detect that the contract moved."
+        ),
+    )
+    last_seen_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When discovery last saw this prompt advertised.",
+    )
+
+    natural_key_field_names = ["mcp_server", "name"]
+
+    class Meta:
+        """Meta class."""
+
+        ordering = ["mcp_server__name", "name"]
+        verbose_name = "MCP Prompt"
+        verbose_name_plural = "MCP Prompts"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["mcp_server", "name"],
+                name="nautobot_ai_models_mcpprompt_unique_server_name",
+            ),
+        ]
+
+    def __str__(self):
+        """Stringify instance."""
+        return f"{self.mcp_server.name}: {self.name}"
+
+    @property
+    def required_arguments(self):
+        """The names of the arguments the server marked required.
+
+        Returns:
+            tuple: The names, in the order the server gave them. Empty when the column holds
+                something other than a list of objects.
+        """
+        if not isinstance(self.arguments, list):
+            return ()
+        return tuple(
+            argument["name"]
+            for argument in self.arguments
+            if isinstance(argument, dict) and argument.get("required") and argument.get("name")
+        )
+
+    @property
+    def is_available(self):
+        """Whether the registry offers this prompt at all.
+
+        Returns:
+            bool: True when the prompt and its server are both enabled.
+        """
+        return self.enabled and self.mcp_server.enabled
+
+
+@extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
 class AITool(OrganizationalModel):  # pylint: disable=too-many-ancestors
     """A tool an agent may call that did not come from an MCP server.
 
@@ -851,12 +1155,12 @@ class AIAgent(PrimaryModel):  # pylint: disable=too-many-ancestors
     def clean(self):
         """Check that the agent can be built.
 
-        The pattern checks run on a saved row only, because a binding cannot exist before its agent
-        does, and a create would otherwise be impossible.
+        Every check that reads a binding runs on a saved row only, because a binding cannot exist
+        before its agent does, and a create would otherwise be impossible.
 
         Raises:
-            ValidationError: The model is not a chat model, or the pattern needs bindings the agent
-                does not have.
+            ValidationError: The model is not a chat model, the model cannot call a tool and this
+                agent has some bound, or the pattern needs bindings the agent does not have.
         """
         super().clean()
 
@@ -873,6 +1177,21 @@ class AIAgent(PrimaryModel):  # pylint: disable=too-many-ancestors
 
         if self._state.adding:
             return
+
+        if (
+            self.model_id is not None
+            and self.model.supports_tools is False
+            and (self.tool_bindings.exists() or self.subagent_bindings.exists())
+        ):
+            raise ValidationError(
+                {
+                    "model": (
+                        f"'{self.model}' is recorded as unable to call a tool, and this agent has "
+                        "tools or subagents bound to it. A supervisor reaches a subagent as a tool "
+                        "as well."
+                    )
+                }
+            )
 
         was = AIAgent.objects.filter(pk=self.pk).values_list("pattern", flat=True).first()
         if self.pattern == was:
@@ -918,6 +1237,21 @@ class AIAgent(PrimaryModel):  # pylint: disable=too-many-ancestors
         return self.model.resolved_num_predict
 
 
+class AIAgentToolQuerySet(RestrictedQuerySet):
+    """Query helpers for tool bindings."""
+
+    def for_list(self):
+        """Everything a list view and a serializer read off each binding.
+
+        ``is_approved`` walks the approvals of a row, and ``wire_name`` walks its target. Without
+        this, a list of bindings costs several queries for each row.
+
+        Returns:
+            AIAgentToolQuerySet: The bindings, with those reads prefetched.
+        """
+        return self.select_related("agent", "mcp_tool__mcp_server", "ai_tool").prefetch_related("approvals")
+
+
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
 class AIAgentTool(OrganizationalModel):  # pylint: disable=too-many-ancestors
     """One tool an agent may call, and what the agent is told about it.
@@ -931,6 +1265,8 @@ class AIAgentTool(OrganizationalModel):  # pylint: disable=too-many-ancestors
     """
 
     is_dynamic_group_associable_model = False
+
+    objects = BaseManager.from_queryset(AIAgentToolQuerySet)()
 
     agent = models.ForeignKey(
         to="nautobot_ai_models.AIAgent",
@@ -1096,10 +1432,236 @@ class AIAgentTool(OrganizationalModel):  # pylint: disable=too-many-ancestors
     def is_available(self):
         """Whether this binding can be offered to a model.
 
+        This does not ask whether anybody approved it. Availability and approval are two questions,
+        and rule **G7** leaves the second one to the consuming app. Read :attr:`is_approved`.
+
         Returns:
             bool: True when the agent and the bound tool are both available.
         """
         return self.agent.is_available and self.target.is_available  # pylint: disable=no-member
+
+    @property
+    def approval(self):
+        """The approval that answers for this binding right now.
+
+        Returns:
+            AIToolApproval | None: The newest approval that is not withdrawn, has not expired, and
+                still matches the current fingerprint.
+        """
+        offered = self.fingerprint
+        now = timezone.now()
+        for approval in self.approvals.all():
+            if approval.revoked_at is not None or approval.fingerprint != offered:
+                continue
+            if approval.expires_at is not None and approval.expires_at <= now:
+                continue
+            return approval
+        return None
+
+    @property
+    def is_approved(self):
+        """Whether a person accepted what this binding offers now.
+
+        A consuming app reads this before it wires a caller. This app enforces nothing.
+
+        Returns:
+            bool: True when an active approval exists.
+        """
+        return self.approval is not None
+
+
+class AIToolApprovalQuerySet(RestrictedQuerySet):
+    """Query helpers for approvals."""
+
+    def for_list(self):
+        """Everything a list view and a serializer read off each approval.
+
+        Returns:
+            AIToolApprovalQuerySet: The approvals, with the binding and both reviewers joined.
+        """
+        return self.select_related(
+            "binding__agent",
+            "binding__mcp_tool",
+            "binding__ai_tool",
+            "approved_by",
+            "revoked_by",
+        )
+
+
+@extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
+class AIToolApproval(OrganizationalModel):  # pylint: disable=too-many-ancestors
+    """One record that a person accepted what a binding offers, at the digest it offered then.
+
+    This is a log. A row is written once and never edited. A withdrawal is a ``revoked_at`` stamp,
+    because the evidence that somebody reviewed the earlier contract is the point of the record.
+
+    This app records the decision and enforces nothing, for the reason rule **G7** in
+    ``services/agents.py`` gives: the gate that a call passes through belongs to the consuming app.
+    That app reads :attr:`AIAgentTool.is_approved` before it wires its own caller.
+    """
+
+    is_dynamic_group_associable_model = False
+
+    natural_key_field_names = ["pk"]
+
+    objects = BaseManager.from_queryset(AIToolApprovalQuerySet)()
+
+    binding = models.ForeignKey(
+        to="nautobot_ai_models.AIAgentTool",
+        on_delete=models.CASCADE,
+        related_name="approvals",
+        verbose_name="AI Agent Tool",
+        help_text=(
+            "The binding that was approved. An approval cannot outlive it, because the answer is "
+            "checked against the binding's own digest and an orphan row can answer nothing."
+        ),
+    )
+    fingerprint = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        help_text=(
+            "The digest the reviewer accepted. Left empty on a create, it is filled from the "
+            "binding. It never changes afterwards: a moved definition needs a new review."
+        ),
+    )
+    approved_by = models.ForeignKey(
+        to=settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="ai_tool_approvals",
+        null=True,
+        blank=True,
+        verbose_name="Approved by",
+        help_text="Who accepted it. Empty once the account is gone; the name below survives that.",
+    )
+    approved_by_name = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        verbose_name="Approved by name",
+        help_text="The name as it read at the time. Kept so a deleted account does not erase the record.",
+    )
+    approved_at = models.DateTimeField(
+        default=timezone.now,
+        db_index=True,
+        verbose_name="Approved at",
+    )
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Expires at",
+        help_text="When the approval has to be renewed. Empty means it does not expire on its own.",
+    )
+    revoked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Revoked at",
+        help_text="When the approval was withdrawn. The row stays, because the review still happened.",
+    )
+    revoked_by = models.ForeignKey(
+        to=settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="revoked_ai_tool_approvals",
+        null=True,
+        blank=True,
+        verbose_name="Revoked by",
+    )
+    revoked_by_name = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        verbose_name="Revoked by name",
+    )
+    note = models.TextField(
+        blank=True,
+        help_text="Why the reviewer accepted it, and why anyone withdrew it.",
+    )
+
+    class Meta:
+        """Meta class.
+
+        There is no uniqueness constraint. A binding can be approved, withdrawn, and approved
+        again, and each of those is a separate fact with its own date.
+        """
+
+        ordering = ["-approved_at", "pk"]
+        get_latest_by = "approved_at"
+        verbose_name = "AI Tool Approval"
+        verbose_name_plural = "AI Tool Approvals"
+
+    def __str__(self):
+        """Stringify instance."""
+        return f"{self.binding}: {self.approved_at:%Y-%m-%d}"
+
+    def save(self, *args, **kwargs):
+        """Fill in the digest before the first write.
+
+        This is here and not only in :meth:`clean`, because the REST API validates a throwaway
+        instance and then writes another one. A digest filled in during validation would never
+        reach the table.
+        """
+        if not self.present_in_database and not self.fingerprint and self.binding_id is not None:
+            self.fingerprint = self.binding.fingerprint  # pylint: disable=no-member
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        """Fill in the digest on a create, and refuse a row that contradicts itself.
+
+        A reviewer accepts what is in front of them. An approval written against a digest that the
+        binding does not offer would answer a question nobody asked.
+
+        Raises:
+            ValidationError: The digest is not the binding's own, the binding or the digest moved
+                after the create, or a date is out of order.
+        """
+        super().clean()
+
+        if self.binding_id is not None and not self.present_in_database:
+            offered = self.binding.fingerprint  # pylint: disable=no-member
+            if not self.fingerprint:
+                self.fingerprint = offered
+            elif self.fingerprint != offered:
+                raise ValidationError(
+                    {"fingerprint": "This is not the definition the binding offers now. Approve what is on offer."}
+                )
+
+        if self.present_in_database:
+            was = AIToolApproval.objects.filter(pk=self.pk).values("binding_id", "fingerprint").first()
+            if was is not None and (was["binding_id"] != self.binding_id or was["fingerprint"] != self.fingerprint):
+                raise ValidationError(
+                    "An approval names one binding and one definition. Revoke this one and add "
+                    "another, so the new definition gets its own review."
+                )
+
+        if self.expires_at is not None and self.approved_at is not None and self.expires_at <= self.approved_at:
+            raise ValidationError({"expires_at": "An approval cannot expire before it was given."})
+
+        if self.revoked_at is not None and self.approved_at is not None and self.revoked_at < self.approved_at:
+            raise ValidationError({"revoked_at": "An approval cannot be withdrawn before it was given."})
+
+    @property
+    def is_expired(self):
+        """Whether the approval has run out.
+
+        Returns:
+            bool: True when an expiry is set and it has passed.
+        """
+        return self.expires_at is not None and self.expires_at <= timezone.now()
+
+    @property
+    def is_current(self):
+        """Whether the approved digest is still the one the binding offers.
+
+        Returns:
+            bool: True when the two digests match.
+        """
+        return self.fingerprint == self.binding.fingerprint  # pylint: disable=no-member
+
+    @property
+    def is_active(self):
+        """Whether this approval answers for the binding right now.
+
+        Returns:
+            bool: True when the row is not withdrawn, has not expired, and still matches.
+        """
+        return self.revoked_at is None and not self.is_expired and self.is_current
 
 
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
@@ -1342,6 +1904,146 @@ class AIAgentSkill(OrganizationalModel):  # pylint: disable=too-many-ancestors
             bool: True when the agent and the skill are both available.
         """
         return self.agent.is_available and self.skill.is_available  # pylint: disable=no-member
+
+
+@extras_features("export_templates", "graphql")
+class AIUsageRecord(BaseModel):
+    """What one model call spent, and what it cost at the price of the day.
+
+    This is the one model here that does not get the five ``extras_features`` the others carry. A
+    webhook for each model call is a firehose, and a change log entry for each one would double the
+    write cost and fill the log an operator reads for governance. It is a ``BaseModel`` for the same
+    reason: :class:`AIAgentThread` argues from volume the other way, because a thread changes state
+    two or three times in a whole run and a usage row lands on every call.
+
+    The app writes no row of its own. It makes no model call, so it has nothing to record. Whatever
+    ran the agent writes these, the same way it writes the thread.
+    """
+
+    is_dynamic_group_associable_model = False
+
+    natural_key_field_names = ["pk"]
+
+    thread = models.ForeignKey(
+        to="nautobot_ai_models.AIAgentThread",
+        on_delete=models.CASCADE,
+        related_name="usage_records",
+        verbose_name="AI Agent Thread",
+        help_text=(
+            "The run this call belongs to. CASCADE and not PROTECT, unlike the agent on a thread: "
+            "retention deletes threads, and PROTECT would make that Job fail."
+        ),
+    )
+    agent = models.ForeignKey(
+        to="nautobot_ai_models.AIAgent",
+        on_delete=models.PROTECT,
+        related_name="usage_records",
+        verbose_name="AI Agent",
+        help_text="Which agent made this call. A subagent call is its own, not the supervisor's.",
+    )
+    model = models.ForeignKey(
+        to="nautobot_ai_models.AIModel",
+        on_delete=models.PROTECT,
+        related_name="usage_records",
+        verbose_name="AI Model",
+        help_text=(
+            "The model actually called, which is not always the thread agent's model. PROTECT, so "
+            "a model cannot be deleted out from under its own cost history."
+        ),
+    )
+    input_tokens = models.PositiveIntegerField(default=0, verbose_name="Input tokens")
+    output_tokens = models.PositiveIntegerField(default=0, verbose_name="Output tokens")
+    cached_input_tokens = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Cached input tokens",
+        help_text="Input tokens the provider served from its cache. These are usually billed differently.",
+    )
+    reasoning_tokens = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Reasoning tokens",
+        help_text="Tokens spent thinking. A provider usually bills these as output.",
+    )
+    input_cost = models.DecimalField(
+        max_digits=COST_MAX_DIGITS,
+        decimal_places=COST_DECIMAL_PLACES,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(MIN_COST)],
+        verbose_name="Input cost",
+        help_text=(
+            "What the input cost, worked out at the price recorded when the call was made. Frozen: "
+            "a vendor changing its price must not reprice last quarter. Empty means nobody had "
+            "recorded a price, which is not the same as free."
+        ),
+    )
+    output_cost = models.DecimalField(
+        max_digits=COST_MAX_DIGITS,
+        decimal_places=COST_DECIMAL_PLACES,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(MIN_COST)],
+        verbose_name="Output cost",
+        help_text="What the answer cost, frozen the same way.",
+    )
+    usage_payload = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="Usage payload",
+        help_text=(
+            "The usage object the provider returned, stored whole. This is what makes the record "
+            "survive a provider adding a token bucket nobody has a column for."
+        ),
+    )
+    recorded_at = models.DateTimeField(
+        default=timezone.now,
+        db_index=True,
+        verbose_name="Recorded at",
+        help_text="When the call was made. Retention measures from here.",
+    )
+
+    class Meta:
+        """Meta class.
+
+        There is no uniqueness constraint. Two identical calls in one run are two facts.
+
+        A ``models.Index`` name is capped at 30 characters, which is why these are abbreviated.
+        """
+
+        ordering = ["-recorded_at", "pk"]
+        get_latest_by = "recorded_at"
+        verbose_name = "AI Usage Record"
+        verbose_name_plural = "AI Usage Records"
+        indexes = [
+            models.Index(fields=["thread", "recorded_at"], name="nb_ai_usage_thread_recd"),
+            models.Index(fields=["model", "recorded_at"], name="nb_ai_usage_model_recd"),
+            models.Index(fields=["agent", "recorded_at"], name="nb_ai_usage_agent_recd"),
+        ]
+
+    def __str__(self):
+        """Stringify instance."""
+        return f"{self.model}: {self.total_tokens} tokens"
+
+    @property
+    def total_tokens(self):
+        """The input and the output added together.
+
+        This is not stored. The provider's own figure is in ``usage_payload``, and it does not
+        always equal the sum.
+
+        Returns:
+            int: The two counts added together.
+        """
+        return self.input_tokens + self.output_tokens
+
+    @property
+    def total_cost(self):
+        """What the call cost altogether.
+
+        Returns:
+            Decimal | None: The two costs added together, or None when neither was recorded.
+        """
+        recorded = [cost for cost in (self.input_cost, self.output_cost) if cost is not None]
+        return sum(recorded) if recorded else None
 
 
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")

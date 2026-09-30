@@ -3,11 +3,11 @@
 The MCP tool serializer carries the whole advertised definition, both schemas included.
 """
 
-from nautobot.apps.api import NautobotModelSerializer, TaggedModelSerializerMixin
+from nautobot.apps.api import NautobotModelSerializer, TaggedModelSerializerMixin, ValidatedModelSerializer
 from rest_framework import serializers as drf_serializers
 
 from nautobot_ai_models import models
-from nautobot_ai_models.constants import MCP_SERVER_DISCOVERED_FIELDS
+from nautobot_ai_models.constants import COST_DECIMAL_PLACES, COST_MAX_DIGITS, MCP_SERVER_DISCOVERED_FIELDS
 
 
 class AIProviderSerializer(NautobotModelSerializer):  # pylint: disable=too-many-ancestors
@@ -76,6 +76,31 @@ class MCPToolSerializer(NautobotModelSerializer):  # pylint: disable=too-many-an
         ]
 
 
+class MCPResourceSerializer(NautobotModelSerializer):  # pylint: disable=too-many-ancestors
+    """MCP Resource Serializer."""
+
+    is_available = drf_serializers.BooleanField(read_only=True)
+
+    class Meta:
+        """Meta attributes."""
+
+        model = models.MCPResource
+        fields = "__all__"
+
+
+class MCPPromptSerializer(NautobotModelSerializer):  # pylint: disable=too-many-ancestors
+    """MCP Prompt Serializer."""
+
+    is_available = drf_serializers.BooleanField(read_only=True)
+    required_arguments = drf_serializers.ListField(read_only=True)
+
+    class Meta:
+        """Meta attributes."""
+
+        model = models.MCPPrompt
+        fields = "__all__"
+
+
 class AIToolSerializer(NautobotModelSerializer):  # pylint: disable=too-many-ancestors
     """AI Tool Serializer.
 
@@ -134,11 +159,33 @@ class AIAgentToolSerializer(NautobotModelSerializer):  # pylint: disable=too-man
     wire_description = drf_serializers.CharField(read_only=True)
     writable = drf_serializers.BooleanField(read_only=True)
     fingerprint = drf_serializers.CharField(read_only=True)
+    is_approved = drf_serializers.BooleanField(read_only=True)
 
     class Meta:
         """Meta attributes."""
 
         model = models.AIAgentTool
+        fields = "__all__"
+
+
+class AIToolApprovalSerializer(NautobotModelSerializer):  # pylint: disable=too-many-ancestors
+    """AI Tool Approval Serializer.
+
+    The digest and the reviewer are read-only. A client that could write them could write a record
+    that says whatever it wants, which is not a record.
+    """
+
+    fingerprint = drf_serializers.CharField(read_only=True)
+    approved_by_name = drf_serializers.CharField(read_only=True)
+    revoked_by_name = drf_serializers.CharField(read_only=True)
+    is_current = drf_serializers.BooleanField(read_only=True)
+    is_expired = drf_serializers.BooleanField(read_only=True)
+    is_active = drf_serializers.BooleanField(read_only=True)
+
+    class Meta:
+        """Meta attributes."""
+
+        model = models.AIToolApproval
         fields = "__all__"
 
 
@@ -174,6 +221,40 @@ class AIAgentSkillSerializer(NautobotModelSerializer):  # pylint: disable=too-ma
         """Meta attributes."""
 
         model = models.AIAgentSkill
+        fields = "__all__"
+
+
+class AIUsageRecordSerializer(ValidatedModelSerializer):  # pylint: disable=too-many-ancestors
+    """AI Usage Record Serializer.
+
+    Not a `NautobotModelSerializer`: the model is a `BaseModel`, so it has no custom fields, no
+    tags, no notes, and no relationships for that class to serialise.
+
+    The two cost fields are read-only. They are frozen at the price of the day when the row is
+    written, and a client that could set them could rewrite last quarter's bill.
+    """
+
+    input_cost = drf_serializers.DecimalField(
+        max_digits=COST_MAX_DIGITS,
+        decimal_places=COST_DECIMAL_PLACES,
+        read_only=True,
+    )
+    output_cost = drf_serializers.DecimalField(
+        max_digits=COST_MAX_DIGITS,
+        decimal_places=COST_DECIMAL_PLACES,
+        read_only=True,
+    )
+    total_tokens = drf_serializers.IntegerField(read_only=True)
+    total_cost = drf_serializers.DecimalField(
+        max_digits=COST_MAX_DIGITS,
+        decimal_places=COST_DECIMAL_PLACES,
+        read_only=True,
+    )
+
+    class Meta:
+        """Meta attributes."""
+
+        model = models.AIUsageRecord
         fields = "__all__"
 
 

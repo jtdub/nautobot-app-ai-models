@@ -14,8 +14,16 @@ See [AI Provider](../models/aiprovider.md#provider-type-and-openai-compatible).
 
 ## Why did discovery create every model as a chat model?
 
-`GET /v1/models` returns chat models and embedding models together. It has no field that says which
-is which. The job records what the endpoint said. Set the **Kind** of each embedding model by hand.
+`GET /v1/models` returns every kind of model together. It has no field that says which is which.
+The job records what the endpoint said, and it says so in its log. Set the **Kind** of each other
+model by hand.
+
+## Why is Supports tools empty, and what does an empty value mean?
+
+It means that nobody has recorded an answer. It does not mean no. Discovery cannot learn this from
+`GET /v1/models`, so a person fills it in. An agent is refused only when the value is a recorded
+**no** and the agent has tools or subagents bound to it. See
+[AI Model](../models/aimodel.md#capabilities).
 
 ## How do I take a provider out of service?
 

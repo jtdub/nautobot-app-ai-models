@@ -1,0 +1,3 @@
+The MCP Server Discovery job now reads resources and prompts as well as tools, and its result names a count for each. It asks for a list only when the server said it has one.
+An AI Agent now refuses to save when its model has Supports tools set to no and the agent has tools or subagents bound to it. That field is new on AI Model, beside Context window and Max output tokens.
+The Prune Agent Threads job now deletes the usage records of every expired thread, whether or not you ask it to delete the thread rows.

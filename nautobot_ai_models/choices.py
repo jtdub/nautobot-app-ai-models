@@ -41,16 +41,27 @@ class AIProviderTypeChoices(ChoiceSet):
 class AIModelKindChoices(ChoiceSet):
     """What a model is for.
 
-    A chat model and an embedding model are not interchangeable and are not the same endpoint.
-    Discovery cannot tell them apart, so a person sets this.
+    Two kinds are not interchangeable and are usually not even the same endpoint. Discovery cannot
+    tell them apart, so a person sets this. ``GET /v1/models`` returns every kind together and has
+    no field that says which is which.
     """
 
     CHAT = "chat"
     EMBEDDING = "embedding"
+    RERANK = "rerank"
+    VISION = "vision"
+    IMAGE = "image"
+    AUDIO = "audio"
+    COMPLETION = "completion"
 
     CHOICES = (
         (CHAT, "Chat"),
         (EMBEDDING, "Embedding"),
+        (RERANK, "Rerank"),
+        (VISION, "Vision"),
+        (IMAGE, "Image generation"),
+        (AUDIO, "Audio"),
+        (COMPLETION, "Completion (legacy)"),
     )
 
 

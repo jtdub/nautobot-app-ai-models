@@ -39,10 +39,15 @@ The External Integration of the provider gives each request setting:
 
 | Property | Value |
 |---|---|
-| Request | An MCP `initialize` handshake, then `tools/list`, in pages |
+| Request | An MCP `initialize` handshake, then `tools/list`, `resources/list`, `resources/templates/list` and `prompts/list`, each in pages |
 | Trigger | The **MCP Server Discovery** Job, run by a user or on a schedule |
 | Target | Each enabled MCP Server whose transport is `streamable-http` |
-| Response | The capabilities of the server, its own metadata, and its tool definitions |
+| Response | The capabilities of the server, its own metadata, and what it advertises |
+
+The Job asks for a list only when the handshake said the server offers it. An unsupported method
+raises, and one raised method would fail the whole pass. A list that fails on its own is logged,
+and nothing of that kind is retired: a server having a bad minute must not disable every record
+that somebody reviewed.
 
 A `stdio` server is a subprocess of its client, so a Nautobot worker cannot reach one. This app
 does not speak HTTP+SSE. Discovery skips both and says so. Register their tools by hand.
@@ -87,6 +92,11 @@ Another system reads the catalog through the REST API. It does not write to the 
 | `/api/plugins/ai-models/ai-models/` | List and manage AI Models |
 | `/api/plugins/ai-models/mcp-servers/` | List and manage MCP Servers |
 | `/api/plugins/ai-models/mcp-tools/` | List and manage MCP Tools |
+| `/api/plugins/ai-models/mcp-resources/` | List and manage MCP Resources |
+| `/api/plugins/ai-models/mcp-prompts/` | List and manage MCP Prompts |
+| `/api/plugins/ai-models/ai-tool-approvals/` | Record and read tool approvals |
+| `/api/plugins/ai-models/ai-agent-threads/` | Record and read agent runs |
+| `/api/plugins/ai-models/ai-usage-records/` | Write and read what a run spent |
 
 List each enabled model of one provider:
 

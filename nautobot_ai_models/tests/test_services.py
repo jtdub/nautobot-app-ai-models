@@ -34,21 +34,44 @@ class TaskGroupError(Exception):
 
 
 class FakeClient:  # pylint: disable=too-few-public-methods
-    """Answers `describe()` with whatever a test handed it."""
+    """Answers `describe()` with whatever a test handed it.
 
-    def __init__(self, info=None, tools=(), error=None):
+    ``tools``, ``resources``, and ``prompts`` each mark their own list as read, so a test that
+    passes none of one kind still gets the "the server offered none" case rather than the "the
+    list was never read" one. Pass ``catalog`` to say otherwise.
+    """
+
+    def __init__(  # pylint: disable=too-many-arguments
+        self, info=None, tools=(), resources=(), prompts=(), error=None, catalog=None
+    ):
         """Hold the canned answer, or the error to raise instead of one."""
         self.info = info if info is not None else mcp.ServerInfo()
-        self.tools = tuple(tools)
+        self.catalog = (
+            catalog
+            if catalog is not None
+            else mcp.AdvertisedCatalog(
+                tools=tuple(tools),
+                resources=tuple(resources),
+                prompts=tuple(prompts),
+                tools_read=True,
+                resources_read=True,
+                prompts_read=True,
+            )
+        )
         self.error = error
         self.calls = []
+
+    @property
+    def tools(self):
+        """The tools this client answers with."""
+        return self.catalog.tools
 
     def describe(self, connection):
         """Record the connection it was handed, then answer."""
         self.calls.append(connection)
         if self.error is not None:
             raise self.error
-        return self.info, self.tools
+        return self.info, self.catalog
 
 
 def tool(name, **kwargs):
@@ -56,6 +79,21 @@ def tool(name, **kwargs):
     kwargs.setdefault("description", f"{name} description")
     kwargs.setdefault("input_schema", {"type": "object"})
     return mcp.ToolDefinition(name=name, **kwargs)
+
+
+def resource(uri, **kwargs):
+    """One `ResourceDefinition`, with the boilerplate filled in."""
+    kwargs.setdefault("name", uri.rsplit("/", 1)[-1])
+    kwargs.setdefault("description", f"{uri} description")
+    kwargs.setdefault("mime_type", "text/plain")
+    return mcp.ResourceDefinition(uri=uri, **kwargs)
+
+
+def prompt(name, **kwargs):
+    """One `PromptDefinition`, with the boilerplate filled in."""
+    kwargs.setdefault("description", f"{name} description")
+    kwargs.setdefault("arguments", ({"name": "site", "required": True},))
+    return mcp.PromptDefinition(name=name, **kwargs)
 
 
 class ConnectionForTest(TestCase):
@@ -176,14 +214,70 @@ class DiscoverTest(TestCase):
         """One reachable server, with nothing discovered on it yet."""
         cls.server = fixtures.create_mcpserver()[0]
 
-    def _discover(self, tools, *, remove_stale=False, info=None, **policy):
-        client = FakeClient(info=info, tools=tools)
+    def _discover(self, tools, *, remove_stale=False, info=None, resources=(), prompts=(), **policy):
+        client = FakeClient(info=info, tools=tools, resources=resources, prompts=prompts)
+        return self._discover_with(client, remove_stale=remove_stale, **policy)
+
+    def _discover_with(self, client, *, remove_stale=False, **policy):
         return mcp.discover(
             self.server,
             remove_stale=remove_stale,
             client=client,
             policy=mcp.DiscoveryPolicy(**policy) if policy else None,
         )
+
+    def test_resources_and_prompts_get_rows_of_their_own(self):
+        """A server offers three things. Only tools used to be recorded."""
+        report = self._discover(
+            [tool("get_device")],
+            resources=[resource("nautobot://devices/inventory")],
+            prompts=[prompt("triage_device")],
+        )
+        self.assertEqual(len(report.tools.added), 1)
+        self.assertEqual(len(report.resources.added), 1)
+        self.assertEqual(len(report.prompts.added), 1)
+        self.assertEqual(self.server.resources.get().uri, "nautobot://devices/inventory")
+        self.assertEqual(self.server.prompts.get().name, "triage_device")
+
+    def test_a_resource_that_stops_being_advertised_is_disabled_not_deleted(self):
+        """The never-delete policy covers every kind, not only tools."""
+        self._discover([], resources=[resource("nautobot://devices/inventory")])
+        report = self._discover([], resources=[])
+        self.assertEqual(len(report.resources.missing), 1)
+        self.assertFalse(self.server.resources.get().enabled)
+
+    def test_a_moved_prompt_definition_is_reported(self):
+        """The digest covers the description, the same as it does for a tool."""
+        self._discover([], prompts=[prompt("triage_device")])
+        report = self._discover([], prompts=[prompt("triage_device", description="Rewritten.")])
+        self.assertEqual(len(report.prompts.definition_changed), 1)
+
+    def test_a_list_that_was_not_read_retires_nothing(self):
+        """A server having a bad minute must not disable every reviewed record."""
+        self._discover([], resources=[resource("nautobot://devices/inventory")])
+        silent = FakeClient(catalog=mcp.AdvertisedCatalog(tools=(), tools_read=True))
+        report = self._discover_with(silent)
+        self.assertEqual(report.resources.missing, ())
+        self.assertTrue(self.server.resources.get().enabled)
+
+    def test_a_prompt_keeps_its_arguments_as_a_list(self):
+        """The protocol sends a list here, and a caller has to read one."""
+        self._discover([], prompts=[prompt("triage_device")])
+        stored = self.server.prompts.get()
+        self.assertIsInstance(stored.arguments, list)
+        self.assertEqual(stored.required_arguments, ("site",))
+
+    def test_a_template_and_a_plain_resource_share_the_table(self):
+        """They are one kind of thing to a reviewer, and the flag tells them apart."""
+        self._discover(
+            [],
+            resources=[
+                resource("nautobot://devices/inventory"),
+                resource("nautobot://sites/{code}", is_template=True),
+            ],
+        )
+        self.assertEqual(self.server.resources.filter(is_template=True).count(), 1)
+        self.assertEqual(self.server.resources.count(), 2)
 
     def test_disabled_server_is_refused(self):
         """An operator who disabled a server should not find its registry changing underneath them."""
@@ -209,7 +303,7 @@ class DiscoverTest(TestCase):
         """Discovery believes the server about everything except what the tool may do."""
         report = self._discover([tool("get_device", read_only_hint=True)])
 
-        self.assertEqual(len(report.added), 1)
+        self.assertEqual(len(report.tools.added), 1)
         created = models.MCPTool.objects.get(mcp_server=self.server, name="get_device")
         self.assertEqual(created.description, "get_device description")
         self.assertTrue(created.advertised_read_only)
@@ -261,22 +355,22 @@ class DiscoverTest(TestCase):
 
         first.refresh_from_db()
         self.assertEqual(first.last_seen_at, stamp)
-        self.assertEqual(len(report.updated), 1)
-        self.assertEqual(report.definition_changed, ())
+        self.assertEqual(len(report.tools.updated), 1)
+        self.assertEqual(report.tools.definition_changed, ())
 
     def test_changed_definition_is_reported(self):
         """Somebody reviewed the old description. They should be told it moved."""
         self._discover([tool("get_device")])
         report = self._discover([tool("get_device", description="something else entirely")])
 
-        self.assertEqual(len(report.definition_changed), 1)
-        self.assertEqual(report.definition_changed[0].name, "get_device")
+        self.assertEqual(len(report.tools.definition_changed), 1)
+        self.assertEqual(report.tools.definition_changed[0].name, "get_device")
 
     def test_a_new_tool_can_arrive_switched_off(self):
         """Opt-in. Forty tools nobody has read should not be on offer because a server said so."""
         report = self._discover([tool("get_device", read_only_hint=True)], new_tools_enabled=False)
 
-        self.assertEqual(len(report.added), 1)
+        self.assertEqual(len(report.tools.added), 1)
         created = models.MCPTool.objects.get(mcp_server=self.server, name="get_device")
         self.assertFalse(created.enabled)
         self.assertTrue(created.writable)
@@ -288,7 +382,7 @@ class DiscoverTest(TestCase):
             [tool("get_device", description="something else entirely")], disable_on_definition_change=True
         )
 
-        self.assertEqual([each.name for each in report.disabled_by_change], ["get_device"])
+        self.assertEqual([each.name for each in report.tools.disabled_by_change], ["get_device"])
         changed = models.MCPTool.objects.get(name="get_device")
         self.assertFalse(changed.enabled)
         self.assertTrue(changed.writable)
@@ -300,7 +394,7 @@ class DiscoverTest(TestCase):
         self._discover([tool("get_device")])
         report = self._discover([tool("get_device", description="something else entirely")])
 
-        self.assertEqual(report.disabled_by_change, ())
+        self.assertEqual(report.tools.disabled_by_change, ())
         self.assertTrue(models.MCPTool.objects.get(name="get_device").enabled)
 
     def test_an_unchanged_definition_is_never_switched_off(self):
@@ -308,7 +402,7 @@ class DiscoverTest(TestCase):
         self._discover([tool("get_device")], disable_on_definition_change=True)
         report = self._discover([tool("get_device")], disable_on_definition_change=True)
 
-        self.assertEqual(report.disabled_by_change, ())
+        self.assertEqual(report.tools.disabled_by_change, ())
         self.assertTrue(models.MCPTool.objects.get(name="get_device").enabled)
 
     def test_a_hand_entered_tool_is_not_switched_off_on_first_sight(self):
@@ -331,7 +425,7 @@ class DiscoverTest(TestCase):
         report = self._discover([tool("get_device")], disable_on_definition_change=True)
 
         by_hand.refresh_from_db()
-        self.assertEqual(report.disabled_by_change, ())
+        self.assertEqual(report.tools.disabled_by_change, ())
         self.assertTrue(by_hand.enabled)
         self.assertFalse(by_hand.writable)
 
@@ -346,15 +440,15 @@ class DiscoverTest(TestCase):
             [tool("get_device", description="something else entirely")], disable_on_definition_change=True
         )
 
-        self.assertEqual(len(report.definition_changed), 1)
-        self.assertEqual(report.disabled_by_change, ())
+        self.assertEqual(len(report.tools.definition_changed), 1)
+        self.assertEqual(report.tools.disabled_by_change, ())
 
     def test_stale_tool_is_disabled_and_kept(self):
         """Losing a tool must not lose the review that was done on it."""
         self._discover([tool("get_device"), tool("set_interface")])
         report = self._discover([tool("get_device")])
 
-        self.assertEqual([tool_.name for tool_ in report.missing], ["set_interface"])
+        self.assertEqual([tool_.name for tool_ in report.tools.missing], ["set_interface"])
         stale = models.MCPTool.objects.get(name="set_interface")
         self.assertFalse(stale.enabled)
         self.assertEqual(stale.description, "set_interface description")
@@ -365,7 +459,7 @@ class DiscoverTest(TestCase):
         self._discover([tool("get_device"), tool("set_interface")])
         report = self._discover([tool("get_device")], remove_stale=True)
 
-        self.assertEqual(len(report.removed), 1)
+        self.assertEqual(len(report.tools.removed), 1)
         self.assertFalse(models.MCPTool.objects.filter(name="set_interface").exists())
 
     def test_a_returning_tool_is_left_disabled(self):

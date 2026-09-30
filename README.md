@@ -17,9 +17,9 @@ AI Models makes Nautobot the source of truth for your LLM estate. It records whi
 exist, how to reach each one, and which models each provider offers. Access control, change
 logging, custom fields, and the REST API all come from Nautobot.
 
-The app is a data catalog. It has no AI or LLM client code and it does no inference. Another app, a
-Job, or an external system reads these records and does the work. This keeps the question *what is
-available and allowed* apart from the question *how do I call it*.
+The app is a data catalog. It does no inference and it calls no tool. It builds an agent from these
+records when asked, and the consuming app runs it. This keeps the question *what is available and
+allowed* apart from the question *how do I call it*.
 
 The app keeps no URL and no credential of its own. Each **AI Provider** points at a Nautobot
 External Integration. That integration gives the remote URL, the HTTP headers, the SSL
@@ -33,9 +33,14 @@ send with a call. `num_predict` and `temperature` fall back to the provider defa
 The **Discover AI Models** Job reads `GET /v1/models` from each enabled, OpenAI-compatible provider
 and keeps the model list current. It creates and updates records. It never deletes one.
 
-A second pair of models does the same for MCP. An **MCP Server** records one server and what it
+A second group of models does the same for MCP. An **MCP Server** records one server and what it
 reported about itself. An **MCP Tool** records one tool that a server advertises, with both
-advertised JSON Schemas and the two flags that a person owns.
+advertised JSON Schemas and the two flags that a person owns. An **MCP Resource** and an **MCP
+Prompt** record the other two things a server offers.
+
+A third group describes an agent: the model it runs on, the tools it may reach, and the specialists
+it may delegate to. An **AI Tool Approval** records that a person accepted what one of those tool
+bindings offers. The record stops answering as soon as the definition moves.
 
 ### Screenshots
 

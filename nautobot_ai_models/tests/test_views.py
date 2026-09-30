@@ -1,6 +1,7 @@
 """Unit tests for views."""
 
 import uuid
+from unittest import skip
 
 from django.urls import NoReverseMatch, reverse
 from nautobot.apps.testing import TestCase, ViewTestCases
@@ -151,6 +152,48 @@ class MCPToolViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
             "enabled": False,
             "writable": False,
         }
+
+
+class MCPResourceViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
+    # pylint: disable=too-many-ancestors
+    """Test the MCPResource views."""
+
+    model = models.MCPResource
+    bulk_edit_data = {"enabled": False}
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data and the form payloads the generic view tests post."""
+        fixtures.create_mcpresource()
+        server = models.MCPServer.objects.first()
+        cls.form_data = {
+            "mcp_server": server.pk,
+            "uri": "nautobot://view/test",
+            "name": "view_test",
+            "enabled": True,
+        }
+        cls.update_data = {
+            "mcp_server": server.pk,
+            "uri": "nautobot://view/test-updated",
+            "name": "view_test",
+            "enabled": True,
+        }
+
+
+class MCPPromptViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
+    # pylint: disable=too-many-ancestors
+    """Test the MCPPrompt views."""
+
+    model = models.MCPPrompt
+    bulk_edit_data = {"enabled": False}
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data and the form payloads the generic view tests post."""
+        fixtures.create_mcpprompt()
+        server = models.MCPServer.objects.first()
+        cls.form_data = {"mcp_server": server.pk, "name": "view_test", "enabled": True}
+        cls.update_data = {"mcp_server": server.pk, "name": "view_test_updated", "enabled": True}
 
 
 class AIToolViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
@@ -313,6 +356,51 @@ class AIAgentSkillViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
         skills = list(models.AISkill.objects.filter(enabled=True).order_by("name"))
         cls.form_data = {"agent": agent.pk, "skill": skills[0].pk, "weight": 100}
         cls.update_data = {"agent": agent.pk, "skill": skills[1].pk, "weight": 150}
+
+
+class AIToolApprovalViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
+    # pylint: disable=too-many-ancestors
+    """Test the AIToolApproval views."""
+
+    model = models.AIToolApproval
+    bulk_edit_data = {"note": "Reviewed in the quarterly pass."}
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data and the form payloads the generic view tests post."""
+        fixtures.create_aitoolapproval()
+        spare = [binding for binding in models.AIAgentTool.objects.all() if not binding.approvals.exists()]
+        cls.form_data = {"binding": spare[0].pk, "note": "Approved through the form."}
+        cls.update_data = {"note": "Renewed after a second read."}
+
+
+class AIUsageRecordViewTest(
+    ViewTestCases.GetObjectViewTestCase,
+    ViewTestCases.ListObjectsViewTestCase,
+    ViewTestCases.DeleteObjectViewTestCase,
+    ViewTestCases.BulkDeleteObjectsViewTestCase,
+):
+    # pylint: disable=too-many-ancestors
+    """Test the AIUsageRecord views.
+
+    Read and delete only. A person does not type a token count, so there is no add or edit view to
+    test.
+    """
+
+    model = models.AIUsageRecord
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AIUsageRecord views."""
+        fixtures.create_aiusagerecord()
+
+    @skip("A BaseModel carries no NotesMixin, so there is no notes route for this to reach.")
+    def test_custom_actions(self):
+        """The generic suite reaches a notes view that only a change-logged model has.
+
+        This model is a `BaseModel` on purpose: a row lands on every model call, and a note on one
+        of them is not a thing anybody writes. Every other case in this suite runs.
+        """
 
 
 class AIAgentThreadViewTest(

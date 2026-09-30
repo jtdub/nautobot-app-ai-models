@@ -2,6 +2,8 @@
 
 from nautobot.apps.api import NautobotModelViewSet
 from nautobot.apps.models import count_related
+from rest_framework import mixins
+from rest_framework.viewsets import GenericViewSet
 
 from nautobot_ai_models import filters, models
 from nautobot_ai_models.api import serializers
@@ -41,6 +43,22 @@ class MCPToolViewSet(NautobotModelViewSet):  # pylint: disable=too-many-ancestor
     filterset_class = filters.MCPToolFilterSet
 
 
+class MCPResourceViewSet(NautobotModelViewSet):  # pylint: disable=too-many-ancestors
+    """MCPResource viewset."""
+
+    queryset = models.MCPResource.objects.select_related("mcp_server")
+    serializer_class = serializers.MCPResourceSerializer
+    filterset_class = filters.MCPResourceFilterSet
+
+
+class MCPPromptViewSet(NautobotModelViewSet):  # pylint: disable=too-many-ancestors
+    """MCPPrompt viewset."""
+
+    queryset = models.MCPPrompt.objects.select_related("mcp_server")
+    serializer_class = serializers.MCPPromptSerializer
+    filterset_class = filters.MCPPromptFilterSet
+
+
 class AIToolViewSet(NautobotModelViewSet):  # pylint: disable=too-many-ancestors
     """AI Tool viewset."""
 
@@ -62,9 +80,17 @@ class AIAgentViewSet(NautobotModelViewSet):  # pylint: disable=too-many-ancestor
 class AIAgentToolViewSet(NautobotModelViewSet):  # pylint: disable=too-many-ancestors
     """AI Agent Tool viewset."""
 
-    queryset = models.AIAgentTool.objects.select_related("agent", "mcp_tool__mcp_server", "ai_tool")
+    queryset = models.AIAgentTool.objects.for_list()
     serializer_class = serializers.AIAgentToolSerializer
     filterset_class = filters.AIAgentToolFilterSet
+
+
+class AIToolApprovalViewSet(NautobotModelViewSet):  # pylint: disable=too-many-ancestors
+    """AIToolApproval viewset."""
+
+    queryset = models.AIToolApproval.objects.for_list()
+    serializer_class = serializers.AIToolApprovalSerializer
+    filterset_class = filters.AIToolApprovalFilterSet
 
 
 class AIAgentSubagentViewSet(NautobotModelViewSet):  # pylint: disable=too-many-ancestors
@@ -89,6 +115,34 @@ class AIAgentSkillViewSet(NautobotModelViewSet):  # pylint: disable=too-many-anc
     queryset = models.AIAgentSkill.objects.select_related("agent", "skill")
     serializer_class = serializers.AIAgentSkillSerializer
     filterset_class = filters.AIAgentSkillFilterSet
+
+
+class AIUsageRecordViewSet(  # pylint: disable=too-many-ancestors
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.DestroyModelMixin,
+    GenericViewSet,
+):
+    """AIUsageRecord viewset.
+
+    Composed rather than a `NautobotModelViewSet`, because the model is a `BaseModel` and that
+    class expects the change-logged surface.
+
+    Create is here and update is not. A consuming app writes a row after it makes a call, and DRF
+    gives it a bulk write for free by posting a list. Nothing rewrites a spend that already
+    happened; a wrong row is deleted.
+    """
+
+    queryset = models.AIUsageRecord.objects.select_related("thread", "agent", "model")
+    serializer_class = serializers.AIUsageRecordSerializer
+    filterset_class = filters.AIUsageRecordFilterSet
+
+    def get_serializer(self, *args, **kwargs):
+        """Serialise a list of records as many, so one POST can carry a whole run."""
+        if isinstance(kwargs.get("data"), list):
+            kwargs["many"] = True
+        return super().get_serializer(*args, **kwargs)
 
 
 class AIAgentThreadViewSet(NautobotModelViewSet):  # pylint: disable=too-many-ancestors

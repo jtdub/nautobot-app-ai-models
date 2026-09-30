@@ -1,5 +1,7 @@
 """Create fixtures for tests."""
 
+from datetime import timedelta
+
 from django.utils import timezone
 from nautobot.extras.models import ExternalIntegration
 
@@ -22,9 +24,14 @@ from nautobot_ai_models.models import (
     AIProvider,
     AISkill,
     AITool,
+    AIToolApproval,
+    AIUsageRecord,
+    MCPPrompt,
+    MCPResource,
     MCPServer,
     MCPTool,
 )
+from nautobot_ai_models.services import usage
 
 INTEGRATIONS = (
     ("Test Integration One", "https://llm.example.com"),
@@ -181,6 +188,94 @@ def register_test_tools():
         tools.register_ai_tool(placeholder, name=name, description=description, writable=writable)
 
 
+def create_mcpresource(**kwargs):
+    """Return the suite's MCP resources, creating them if they do not exist.
+
+    Returns:
+        list: Four MCPResource records. One is a template, and one URI is offered by two servers.
+    """
+    if MCPResource.objects.exists():
+        return list(MCPResource.objects.all())
+
+    servers = create_mcpserver()
+    return [
+        MCPResource.objects.create(
+            mcp_server=servers[0],
+            uri="nautobot://devices/inventory",
+            name="inventory",
+            title="Device inventory",
+            description="Every device this Nautobot knows about.",
+            mime_type="application/json",
+            **kwargs,
+        ),
+        MCPResource.objects.create(
+            mcp_server=servers[0],
+            uri="nautobot://sites/{site_code}",
+            name="site",
+            description="One site, by its code.",
+            mime_type="application/json",
+            is_template=True,
+            **kwargs,
+        ),
+        MCPResource.objects.create(
+            mcp_server=servers[1],
+            uri="nautobot://devices/inventory",
+            name="inventory",
+            description="The same URI under another server.",
+            **kwargs,
+        ),
+        MCPResource.objects.create(
+            mcp_server=servers[1],
+            uri="nautobot://circuits/summary",
+            name="circuits",
+            description="Every circuit and its provider.",
+            mime_type="text/csv",
+            **kwargs,
+        ),
+    ]
+
+
+def create_mcpprompt(**kwargs):
+    """Return the suite's MCP prompts, creating them if they do not exist.
+
+    Returns:
+        list: Four MCPPrompt records. One name is offered by two servers.
+    """
+    if MCPPrompt.objects.exists():
+        return list(MCPPrompt.objects.all())
+
+    servers = create_mcpserver()
+    return [
+        MCPPrompt.objects.create(
+            mcp_server=servers[0],
+            name="triage_device",
+            title="Triage a device",
+            description="Walk through a device that is down.",
+            arguments=[{"name": "hostname", "description": "The device name.", "required": True}],
+            **kwargs,
+        ),
+        MCPPrompt.objects.create(
+            mcp_server=servers[0],
+            name="summarise_site",
+            description="Summarise one site.",
+            arguments=[{"name": "site_code", "required": False}],
+            **kwargs,
+        ),
+        MCPPrompt.objects.create(
+            mcp_server=servers[1],
+            name="triage_device",
+            description="The same name under another server.",
+            **kwargs,
+        ),
+        MCPPrompt.objects.create(
+            mcp_server=servers[1],
+            name="explain_circuit",
+            description="Explain one circuit in plain words.",
+            **kwargs,
+        ),
+    ]
+
+
 def create_aitool(**kwargs):
     """Return the suite's AI Tools, creating them if they do not exist.
 
@@ -281,6 +376,50 @@ def create_aiagenttool(**kwargs):
         ),
         AIAgentTool.objects.create(agent=agents[1], mcp_tool=mcp_tools[1], weight=200, **kwargs),
         AIAgentTool.objects.create(agent=agents[1], ai_tool=ai_tools[1], weight=300, **kwargs),
+    ]
+
+
+def create_aitoolapproval(**kwargs):
+    """Return the suite's approvals, creating them if they do not exist.
+
+    One approval stands, one is withdrawn, and one has expired. Every question the model answers
+    then has a row behind it.
+
+    Returns:
+        list: Three AIToolApproval records.
+    """
+    if AIToolApproval.objects.exists():
+        return list(AIToolApproval.objects.all())
+
+    bindings = create_aiagenttool()
+    now = timezone.now()
+    return [
+        AIToolApproval.objects.create(
+            binding=bindings[0],
+            fingerprint=bindings[0].fingerprint,
+            approved_by_name="reviewer",
+            note="Read-only lookup. Nothing to review.",
+            **kwargs,
+        ),
+        AIToolApproval.objects.create(
+            binding=bindings[1],
+            fingerprint=bindings[1].fingerprint,
+            approved_by_name="reviewer",
+            approved_at=now - timedelta(days=2),
+            revoked_at=now - timedelta(days=1),
+            revoked_by_name="reviewer",
+            note="Withdrawn while the description was rewritten.",
+            **kwargs,
+        ),
+        AIToolApproval.objects.create(
+            binding=bindings[2],
+            fingerprint=bindings[2].fingerprint,
+            approved_by_name="reviewer",
+            expires_at=now - timedelta(days=1),
+            approved_at=now - timedelta(days=30),
+            note="A quarterly review that nobody renewed.",
+            **kwargs,
+        ),
     ]
 
 
@@ -388,6 +527,56 @@ def create_aiagentthread(**kwargs):
             agent=agents[1],
             status=AIAgentThreadStatusChoices.COMPLETED,
             finished_at=timezone.now(),
+            **kwargs,
+        ),
+    ]
+
+
+def create_aiusagerecord(**kwargs):
+    """Return the suite's usage records, creating them if they do not exist.
+
+    One priced model and one unpriced one, so the "nobody recorded a price" case has a row.
+
+    Returns:
+        list: Three AIUsageRecord records.
+    """
+    if AIUsageRecord.objects.exists():
+        return list(AIUsageRecord.objects.all())
+
+    threads = create_aiagentthread()
+    priced = AIModel.objects.filter(input_cost_per_million__isnull=False).first()
+    if priced is None:
+        priced = AIModel.objects.filter(kind=AIModelKindChoices.CHAT).first()
+        priced.input_cost_per_million = "2.5000"
+        priced.output_cost_per_million = "10.0000"
+        priced.validated_save()
+    unpriced = AIModel.objects.filter(kind=AIModelKindChoices.CHAT).exclude(pk=priced.pk).first()
+
+    return [
+        usage.record(
+            threads[0],
+            threads[0].agent,
+            priced,
+            input_tokens=1200,
+            output_tokens=340,
+            usage_payload={"prompt_tokens": 1200, "completion_tokens": 340},
+            **kwargs,
+        ),
+        usage.record(
+            threads[0],
+            threads[0].agent,
+            priced,
+            input_tokens=800,
+            output_tokens=210,
+            cached_input_tokens=600,
+            **kwargs,
+        ),
+        usage.record(
+            threads[2],
+            threads[2].agent,
+            unpriced,
+            input_tokens=95,
+            output_tokens=40,
             **kwargs,
         ),
     ]

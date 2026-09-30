@@ -4,7 +4,12 @@ This module asks a server what it offers and writes the answer onto the registry
 It imports the client library lazily, behind the optional ``discovery`` extra. Nothing acts on the
 annotations a server sends.
 
-This module never writes ``writable``. It writes ``enabled`` only to turn a tool off.
+This module never writes ``writable``. It writes ``enabled`` only to turn a record off.
+
+A server advertises three things: tools, resources, and prompts. One reconcile drives all three,
+because a second copy of the never-delete policy is a second place for it to go wrong. This module
+asks for a list only when the handshake said the server offers it: an unsupported method raises,
+and one raised method must not fail a whole pass.
 """
 
 import asyncio
@@ -20,7 +25,7 @@ from nautobot_ai_models.app_settings import DISABLE_ON_DEFINITION_CHANGE, NEW_TO
 from nautobot_ai_models.choices import MCPTransportChoices
 from nautobot_ai_models.constants import DEFAULT_TIMEOUT_SECONDS
 from nautobot_ai_models.integrations import canonical_digest, integration_timeout, render_field
-from nautobot_ai_models.models import MCPTool
+from nautobot_ai_models.models import MCPPrompt, MCPResource, MCPTool
 from nautobot_ai_models.secrets import read_secret
 from nautobot_ai_models.services.exceptions import MCPCallError, MCPConfigurationError
 
@@ -28,7 +33,13 @@ logger = logging.getLogger(__name__)
 
 SSE_READ_TIMEOUT_SECONDS = 300
 
-MAX_TOOL_PAGES = 50
+MAX_LIST_PAGES = 50
+
+TOOLS_CAPABILITY = "tools"
+
+RESOURCES_CAPABILITY = "resources"
+
+PROMPTS_CAPABILITY = "prompts"
 
 AUTHORIZATION_HEADER = "Authorization"
 
@@ -77,6 +88,47 @@ class ToolDefinition:
     input_schema: dict = field(default_factory=dict)
     output_schema: dict = field(default_factory=dict)
     read_only_hint: bool = None
+
+
+@dataclass(frozen=True)
+class ResourceDefinition:  # pylint: disable=too-many-instance-attributes
+    """One resource as a server advertised it, before this app has any opinion about it."""
+
+    uri: str
+    name: str = ""
+    title: str = ""
+    description: str = ""
+    mime_type: str = ""
+    is_template: bool = False
+    size: int = None
+    annotations: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PromptDefinition:
+    """One prompt template as a server advertised it."""
+
+    name: str
+    title: str = ""
+    description: str = ""
+    arguments: tuple = ()
+
+
+@dataclass(frozen=True)
+class AdvertisedCatalog:
+    """Everything one server offered, in one answer.
+
+    Each ``*_read`` flag says whether that list was read at all. A list the server does not offer,
+    or one that failed on its own, leaves the flag clear, and the reconcile then retires nothing of
+    that kind. Without the flag a single failed call would disable every reviewed row.
+    """
+
+    tools: tuple = ()
+    resources: tuple = ()
+    prompts: tuple = ()
+    tools_read: bool = False
+    resources_read: bool = False
+    prompts_read: bool = False
 
 
 @dataclass(frozen=True)
@@ -129,6 +181,131 @@ class DiscoveryReport:
         )
 
 
+@dataclass(frozen=True)
+class ServerDiscoveryReport:
+    """What one pass changed, split by the kind of thing the server advertises."""
+
+    tools: DiscoveryReport = field(default_factory=DiscoveryReport)
+    resources: DiscoveryReport = field(default_factory=DiscoveryReport)
+    prompts: DiscoveryReport = field(default_factory=DiscoveryReport)
+
+    def by_kind(self):
+        """Each sub-report beside the label an operator reads.
+
+        Returns:
+            tuple: Pairs of a label and a DiscoveryReport, in a stable order.
+        """
+        return (("Tool", self.tools), ("Resource", self.resources), ("Prompt", self.prompts))
+
+    def summary(self):
+        """One line for a log or a Job result."""
+        return "; ".join(f"{label.lower()}s: {report.summary()}" for label, report in self.by_kind())
+
+
+@dataclass(frozen=True)
+class RecordKind:
+    """How one kind of advertised thing maps onto a registry table.
+
+    One reconcile reads this instead of three near-identical copies of itself.
+    """
+
+    label: str
+    model: type
+    related_name: str
+    key_field: str
+    columns: tuple
+    fingerprint_columns: tuple = ()
+
+    def key(self, definition):
+        """The value that identifies one advertised record within its server.
+
+        Args:
+            definition: What the server advertised.
+
+        Returns:
+            str: The key.
+        """
+        return getattr(definition, self.key_field)
+
+    def values(self, definition):
+        """The server-owned columns of one advertised record.
+
+        Args:
+            definition: What the server advertised.
+
+        Returns:
+            dict: Column names mapped to what the server said, with an empty value in place of
+                None so that a column never holds a null it does not allow.
+        """
+        return {name: _blank_safe(getattr(definition, name)) for name in self.columns}
+
+    def fingerprint(self, definition):
+        """Digest what the server said about one record.
+
+        The digest covers the description as well as the schema. The description is half of what a
+        reviewer read, and it is the sentence a compromised server would rewrite while it left the
+        rest alone.
+
+        ``fingerprint_columns`` is separate from ``columns`` because a tool's ``readOnlyHint`` is
+        stored and is not digested. Folding it in would move the digest of every tool already in
+        the registry, which would retire every approval and, under
+        ``disable_on_definition_change``, switch every tool off.
+
+        Args:
+            definition: What the server advertised.
+
+        Returns:
+            str: A hex SHA-256 digest.
+        """
+        names = self.fingerprint_columns or self.columns
+        return canonical_digest({name: _blank_safe(getattr(definition, name)) for name in names})
+
+
+def _blank_safe(value):
+    """Return a value a column can hold, with None turned into an empty one where it must be.
+
+    Args:
+        value: What the server said.
+
+    Returns:
+        The value, or an empty string, dict, or list in place of a None the column refuses.
+    """
+    if value is None:
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return value
+
+
+TOOL_KIND = RecordKind(
+    label="Tool",
+    model=MCPTool,
+    related_name="tools",
+    key_field="name",
+    columns=("title", "description", "input_schema", "output_schema", "read_only_hint"),
+    fingerprint_columns=("title", "description", "input_schema", "output_schema"),
+)
+
+RESOURCE_KIND = RecordKind(
+    label="Resource",
+    model=MCPResource,
+    related_name="resources",
+    key_field="uri",
+    columns=("name", "title", "description", "mime_type", "is_template", "size", "annotations"),
+)
+
+PROMPT_KIND = RecordKind(
+    label="Prompt",
+    model=MCPPrompt,
+    related_name="prompts",
+    key_field="name",
+    columns=("title", "description", "arguments"),
+)
+
+COLUMN_ALIASES = {"read_only_hint": "advertised_read_only"}
+"""The one column whose name on the wire is not its name in the registry."""
+
+
 def require_client():
     """Resolve the MCP client now, so a missing ``discovery`` extra fails early.
 
@@ -179,17 +356,17 @@ def connection_for(server):
 
 
 def discover(server, *, remove_stale=False, client=None, policy=None):
-    """Read a server's identity and tool list, and reconcile the registry with it.
+    """Read what a server offers, and reconcile the registry with it.
 
     Args:
         server: The MCPServer to read.
-        remove_stale: Delete tools the server no longer advertises instead of disabling them.
+        remove_stale: Delete records the server no longer advertises instead of disabling them.
         client: The test seam. An object with ``describe(connection)``. Nothing outside a test
             supplies one.
         policy: Read from settings when not given.
 
     Returns:
-        DiscoveryReport: What the pass changed.
+        ServerDiscoveryReport: What the pass changed, split by kind.
 
     Raises:
         MCPConfigurationError: The server cannot be reached because of how it is configured.
@@ -209,13 +386,17 @@ def discover(server, *, remove_stale=False, client=None, policy=None):
     policy = policy if policy is not None else DiscoveryPolicy.from_settings()
 
     try:
-        info, advertised = caller.describe(connection)
+        info, catalog = caller.describe(connection)
     except Exception as error:  # pylint: disable=broad-except
-        raise MCPCallError(f"Could not read the tools on '{server}': {_cause(error)}") from error
+        raise MCPCallError(f"Could not read what '{server}' offers: {_cause(error)}") from error
 
-    report = _reconcile(server, tuple(advertised), remove_stale=remove_stale, policy=policy)
+    report = ServerDiscoveryReport(
+        tools=_reconcile(server, TOOL_KIND, catalog.tools, catalog.tools_read, remove_stale, policy),
+        resources=_reconcile(server, RESOURCE_KIND, catalog.resources, catalog.resources_read, remove_stale, policy),
+        prompts=_reconcile(server, PROMPT_KIND, catalog.prompts, catalog.prompts_read, remove_stale, policy),
+    )
     _record_server_info(server, info)
-    logger.info("Discovered tools on MCP server %s: %s", server, report.summary())
+    logger.info("Discovered MCP server %s: %s", server, report.summary())
     return report
 
 
@@ -265,33 +446,46 @@ def _record_server_info(server, info):
         raise MCPCallError(f"'{server}' reported metadata this registry cannot hold: {error}") from error
 
 
-def _reconcile(server, advertised, *, remove_stale, policy):
-    """Write what was advertised onto the registry, in one transaction.
+def _reconcile(server, kind, advertised, was_read, remove_stale, policy):  # pylint: disable=too-many-arguments,too-many-locals
+    """Write what was advertised onto one registry table, in one transaction.
+
+    A list that was not read leaves the table alone. A server that offers no prompts, and a
+    prompts call that failed on its own, must not disable every prompt somebody reviewed.
 
     Args:
         server: The MCPServer being discovered.
-        advertised: The tools the server offered.
-        remove_stale: Delete tools no longer advertised instead of disabling them.
+        kind: Which table this pass writes.
+        advertised: What the server offered, of that kind.
+        was_read: Whether that list was actually read.
+        remove_stale: Delete records no longer advertised instead of disabling them.
         policy: What this pass may do to ``enabled``.
 
     Returns:
         DiscoveryReport: What the pass changed.
 
     Raises:
-        MCPCallError: The server advertised a tool the registry cannot hold.
+        MCPCallError: The server advertised a record the registry cannot hold.
     """
+    if not was_read:
+        return DiscoveryReport()
+
     now = timezone.now()
+    advertised = tuple(advertised)
 
     try:
         with transaction.atomic():
-            existing = {tool.name: tool for tool in server.tools.all()}
-            added, updated, definition_changed, disabled_by_change = _upsert(server, advertised, existing, now, policy)
+            existing = {kind.key(record): record for record in getattr(server, kind.related_name).all()}
+            added, updated, definition_changed, disabled_by_change = _upsert(
+                server, kind, advertised, existing, now, policy
+            )
 
-            advertised_names = {definition.name for definition in advertised}
-            stale = tuple(tool for name, tool in sorted(existing.items()) if name not in advertised_names)
+            advertised_keys = {kind.key(definition) for definition in advertised}
+            stale = tuple(record for key, record in sorted(existing.items()) if key not in advertised_keys)
             missing, removed = _retire(stale, remove_stale=remove_stale)
     except (ValidationError, IntegrityError) as error:
-        raise MCPCallError(f"'{server}' advertised a tool this registry cannot hold: {error}") from error
+        raise MCPCallError(
+            f"'{server}' advertised a {kind.label.lower()} this registry cannot hold: {error}"
+        ) from error
 
     return DiscoveryReport(
         added=added,
@@ -303,16 +497,17 @@ def _reconcile(server, advertised, *, remove_stale, policy):
     )
 
 
-def _upsert(server, advertised, existing, now, policy):
-    """Create or refresh a row for each advertised tool.
+def _upsert(server, kind, advertised, existing, now, policy):  # pylint: disable=too-many-arguments,too-many-locals
+    """Create or refresh a row for each advertised record.
 
-    This function mutates ``existing`` as it goes, so a server that advertises one name twice
+    This function mutates ``existing`` as it goes, so a server that advertises one key twice
     updates its own first row instead of a collision on the unique constraint.
 
     Args:
         server: The MCPServer under discovery.
-        advertised: The tools the server offered.
-        existing: Tools already in the registry, keyed by name. Mutated.
+        kind: Which table this pass writes.
+        advertised: What the server offered.
+        existing: Rows already in the registry, keyed by their wire key. Mutated.
         now: The timestamp for this pass.
         policy: What this pass may do to ``enabled``.
 
@@ -322,131 +517,139 @@ def _upsert(server, advertised, existing, now, policy):
     added, updated, definition_changed, disabled_by_change = [], [], [], []
 
     for definition in advertised:
-        fingerprint = definition_fingerprint(definition)
-        tool = existing.get(definition.name)
+        fingerprint = kind.fingerprint(definition)
+        key = kind.key(definition)
+        record = existing.get(key)
 
-        if tool is None:
-            tool = _create(server, definition, fingerprint, now, enabled=policy.new_tools_enabled)
-            existing[tool.name] = tool
-            added.append(tool)
+        if record is None:
+            record = _create(server, kind, definition, fingerprint, now, enabled=policy.new_tools_enabled)
+            existing[key] = record
+            added.append(record)
             continue
 
         changed, disabled = _update(
-            tool, definition, fingerprint, now, disable_on_change=policy.disable_on_definition_change
+            record, kind, definition, fingerprint, now, disable_on_change=policy.disable_on_definition_change
         )
-        (definition_changed if changed else updated).append(tool)
+        (definition_changed if changed else updated).append(record)
         if disabled:
-            disabled_by_change.append(tool)
+            disabled_by_change.append(record)
 
     return tuple(added), tuple(updated), tuple(definition_changed), tuple(disabled_by_change)
 
 
-def _create(server, definition, fingerprint, now, *, enabled):
-    """Write a newly advertised tool.
-
-    ``writable`` stays at its model default of True. The tool changes something until a person
-    says otherwise. The server's ``readOnlyHint`` sits beside it and decides nothing. ``enabled``
-    answers a different question, so the caller decides it.
+def _columns_for(kind, definition):
+    """The registry column names and values for one advertised record.
 
     Args:
-        server: The MCPServer that advertised the tool.
+        kind: Which table this pass writes.
+        definition: What the server advertised.
+
+    Returns:
+        dict: Column names as the model spells them, mapped to what the server said.
+    """
+    return {COLUMN_ALIASES.get(name, name): value for name, value in kind.values(definition).items()}
+
+
+def _create(server, kind, definition, fingerprint, now, *, enabled):  # pylint: disable=too-many-arguments
+    """Write a newly advertised record.
+
+    ``writable`` stays at its model default of True where the model has one. The record changes
+    something until a person says otherwise, and the server's own hint sits beside it and decides
+    nothing. ``enabled`` answers a different question, so the caller decides it.
+
+    Args:
+        server: The MCPServer that advertised it.
+        kind: Which table this pass writes.
         definition: What the server said about it.
         fingerprint: The digest of that definition.
         now: The timestamp for this pass.
-        enabled: Whether the tool arrives on offer.
+        enabled: Whether the record arrives on offer.
 
     Returns:
-        MCPTool: The saved row.
+        The saved row.
     """
-    tool = MCPTool(
+    record = kind.model(
         mcp_server=server,
-        name=definition.name,
-        title=definition.title or "",
-        description=definition.description or "",
-        input_schema=definition.input_schema or {},
-        output_schema=definition.output_schema or {},
         enabled=enabled,
-        advertised_read_only=definition.read_only_hint,
         definition_fingerprint=fingerprint,
         last_seen_at=now,
+        **{kind.key_field: kind.key(definition)},
+        **_columns_for(kind, definition),
     )
-    tool.validated_save()
-    return tool
+    record.validated_save()
+    return record
 
 
-def _update(tool, definition, fingerprint, now, *, disable_on_change):
-    """Refresh what the server says about an existing tool.
+def _update(record, kind, definition, fingerprint, now, *, disable_on_change):  # pylint: disable=too-many-arguments
+    """Refresh what the server says about an existing record.
 
     This function never writes ``writable``. It writes ``enabled`` only when ``disable_on_change``
-    is set and the fingerprint moved under a tool that was on and that discovery had seen before.
-    The row keeps its schemas, its description, and its review history.
+    is set and the fingerprint moved under a record that was on and that discovery had seen before.
+    The row keeps its review history either way.
 
-    A tool entered by hand carries no fingerprint and no ``last_seen_at``, so its first sight is a
-    first sight and not a change. A switch-off there would undo a review somebody had just done.
+    A record entered by hand carries no fingerprint and no ``last_seen_at``, so its first sight is
+    a first sight and not a change. A switch-off there would undo a review somebody had just done.
 
     Args:
-        tool: The row to refresh.
+        record: The row to refresh.
+        kind: Which table this pass writes.
         definition: What the server said about it.
         fingerprint: The digest of that definition.
         now: The timestamp for this pass.
         disable_on_change: Clear ``enabled`` when the fingerprint moved.
 
     Returns:
-        tuple[bool, bool]: Whether the definition moved, and whether this call switched the tool
+        tuple[bool, bool]: Whether the definition moved, and whether this call switched the record
             off.
     """
-    changed = tool.definition_fingerprint != fingerprint
+    changed = record.definition_fingerprint != fingerprint
 
-    if not changed and tool.last_seen_at is not None:
+    if not changed and record.last_seen_at is not None:
         return False, False
 
-    disabled = changed and disable_on_change and tool.enabled and tool.last_seen_at is not None
+    disabled = changed and disable_on_change and record.enabled and record.last_seen_at is not None
 
-    tool.title = definition.title or ""
-    tool.description = definition.description or ""
-    tool.input_schema = definition.input_schema or {}
-    tool.output_schema = definition.output_schema or {}
-    tool.advertised_read_only = definition.read_only_hint
-    tool.definition_fingerprint = fingerprint
-    tool.last_seen_at = now
+    for name, value in _columns_for(kind, definition).items():
+        setattr(record, name, value)
+    record.definition_fingerprint = fingerprint
+    record.last_seen_at = now
     if disabled:
-        tool.enabled = False
-    tool.validated_save()
+        record.enabled = False
+    record.validated_save()
     return changed, disabled
 
 
 def _retire(stale, *, remove_stale):
-    """Deal with tools the server no longer advertises.
+    """Deal with records the server no longer advertises.
 
     A disable is the default, because it keeps the description, the schema, and the review. This
-    function does not touch ``last_seen_at``, which is the evidence of when the tool went away.
+    function does not touch ``last_seen_at``, which is the evidence of when the record went away.
 
     Args:
-        stale: The tools no longer advertised.
+        stale: The records no longer advertised.
         remove_stale: Delete them instead of a disable.
 
     Returns:
-        tuple: The tools disabled by this run, and the labels of those deleted.
+        tuple: The records disabled by this run, and the labels of those deleted.
     """
     disabled, deleted = [], []
-    for tool in stale:
+    for record in stale:
         if remove_stale:
-            deleted.append(str(tool))
-            tool.delete()
+            deleted.append(str(record))
+            record.delete()
             continue
-        if tool.enabled:
-            tool.enabled = False
-            tool.validated_save()
-            disabled.append(tool)
+        if record.enabled:
+            record.enabled = False
+            record.validated_save()
+            disabled.append(record)
     return tuple(disabled), tuple(deleted)
 
 
 def definition_fingerprint(definition):
     """Digest everything a server said about one tool.
 
-    The digest covers the description as well as the schemas. The description is half of what a
-    reviewer read, and it is the sentence a compromised server would rewrite while it left the
-    arguments alone. The keys are sorted, so a serialisation order does not move the digest.
+    Kept as a named function because another app codes against it. It is
+    ``TOOL_KIND.fingerprint`` under a name that says what it digests.
 
     Args:
         definition: What the server advertised.
@@ -576,47 +779,103 @@ class _StreamableHTTPClient:  # pylint: disable=too-few-public-methods
         self._timeout_class = timeout_class
 
     def describe(self, connection):
-        """Read what the server is and every tool it advertises, in one session.
+        """Read what the server is and everything it advertises, in one session.
 
         Args:
             connection: Where and how to connect.
 
         Returns:
-            tuple: A ServerInfo and a tuple of ToolDefinition.
+            tuple: A ServerInfo and an AdvertisedCatalog.
         """
-        info, pages = self._run(connection, self._describe)
-        definitions = []
-        for page in pages:
-            definitions.extend(_tool_definition(tool) for tool in page.tools)
-        return info, tuple(definitions)
+        return self._run(connection, self._describe)
 
     async def _describe(self, session, initialized):
-        """Read the session's own handshake result, then every page of the tool list."""
-        return _server_info(initialized), await self._pages(session)
+        """Read the handshake result, then each list the handshake said the server offers."""
+        info = _server_info(initialized)
+        offered = info.capabilities or {}
 
-    async def _pages(self, session):
-        """Read every page of the tool list, in order.
+        tools, tools_read = await self._listed(
+            session, TOOLS_CAPABILITY, offered, "list_tools", "tools", _tool_definition
+        )
+        resources, resources_read = await self._listed(
+            session, RESOURCES_CAPABILITY, offered, "list_resources", "resources", _resource_definition
+        )
+        templates, templates_read = await self._listed(
+            session,
+            RESOURCES_CAPABILITY,
+            offered,
+            "list_resource_templates",
+            "resource_templates",
+            _resource_template_definition,
+        )
+        prompts, prompts_read = await self._listed(
+            session, PROMPTS_CAPABILITY, offered, "list_prompts", "prompts", _prompt_definition
+        )
 
-        Bounded by ``MAX_TOOL_PAGES``, so a cursor pointing at itself is not an infinite loop.
+        return info, AdvertisedCatalog(
+            tools=tools,
+            resources=resources + templates,
+            prompts=prompts,
+            tools_read=tools_read,
+            resources_read=resources_read and templates_read,
+            prompts_read=prompts_read,
+        )
+
+    async def _listed(self, session, capability, offered, method, attribute, build):  # pylint: disable=too-many-arguments
+        """Read one list, when the server said it has one.
+
+        A list the server does not advertise is not asked for: an unsupported method raises, and
+        one raised method would fail the whole pass and leave every other record stale. A list that
+        fails on its own is logged and reported as unread, so the reconcile retires nothing.
 
         Args:
             session: The open MCP session.
+            capability: The handshake key that says the server offers this list.
+            offered: What the handshake advertised.
+            method: The session method to call.
+            attribute: The attribute of a page that holds the records.
+            build: Turns one SDK object into a definition.
 
         Returns:
-            list: Every tool the server advertised.
+            tuple: The definitions, and whether the list was read.
+        """
+        if capability not in offered or not hasattr(session, method):
+            return (), False
+
+        try:
+            pages = await self._pages(getattr(session, method))
+        except Exception as error:  # pylint: disable=broad-except
+            logger.warning("Could not read %s: %s. Nothing of that kind was retired.", method, _cause(error))
+            return (), False
+
+        definitions = []
+        for page in pages:
+            definitions.extend(build(each) for each in getattr(page, attribute, None) or ())
+        return tuple(definitions), True
+
+    async def _pages(self, lister):
+        """Read every page of one list, in order.
+
+        Bounded by ``MAX_LIST_PAGES``, so a cursor pointing at itself is not an infinite loop.
+
+        Args:
+            lister: The bound session method that reads one page.
+
+        Returns:
+            list: Every page the server returned.
         """
         from mcp import types  # pylint: disable=import-outside-toplevel
 
         pages = []
         cursor = None
-        for _ in range(MAX_TOOL_PAGES):
+        for _ in range(MAX_LIST_PAGES):
             params = types.PaginatedRequestParams(cursor=cursor) if cursor else None
-            page = await session.list_tools(params=params)
+            page = await lister(params=params)
             pages.append(page)
             cursor = _attr(page, "next_cursor", "nextCursor")
             if not cursor:
                 return pages
-        logger.warning("Stopped reading tool pages after %s; the server kept offering a cursor", MAX_TOOL_PAGES)
+        logger.warning("Stopped reading pages after %s; the server kept offering a cursor", MAX_LIST_PAGES)
         return pages
 
     def _run(self, connection, operation):
@@ -688,6 +947,52 @@ def _tool_definition(tool):
         input_schema=_as_dict(_attr(tool, "input_schema", "inputSchema")),
         output_schema=_as_dict(_attr(tool, "output_schema", "outputSchema")),
         read_only_hint=_attr(annotations, "read_only_hint", "readOnlyHint") if annotations is not None else None,
+    )
+
+
+def _resource_definition(resource):
+    """A `ResourceDefinition` from one of the SDK's resource objects."""
+    return ResourceDefinition(
+        uri=str(_attr(resource, "uri", default="") or ""),
+        name=str(_attr(resource, "name", default="") or ""),
+        title=str(_attr(resource, "title", default="") or ""),
+        description=str(_attr(resource, "description", default="") or ""),
+        mime_type=str(_attr(resource, "mime_type", "mimeType", default="") or ""),
+        is_template=False,
+        size=_attr(resource, "size"),
+        annotations=_as_dict(_attr(resource, "annotations")),
+    )
+
+
+def _resource_template_definition(template):
+    """A `ResourceDefinition` from one of the SDK's resource-template objects.
+
+    A template carries its URI under another name, and the row records that the URI has parameters
+    in it rather than being one a client can read directly.
+    """
+    return ResourceDefinition(
+        uri=str(_attr(template, "uri_template", "uriTemplate", default="") or ""),
+        name=str(_attr(template, "name", default="") or ""),
+        title=str(_attr(template, "title", default="") or ""),
+        description=str(_attr(template, "description", default="") or ""),
+        mime_type=str(_attr(template, "mime_type", "mimeType", default="") or ""),
+        is_template=True,
+        size=None,
+        annotations=_as_dict(_attr(template, "annotations")),
+    )
+
+
+def _prompt_definition(prompt):
+    """A `PromptDefinition` from one of the SDK's prompt objects.
+
+    The arguments arrive as a list rather than a JSON Schema, so they are stored as a list.
+    """
+    arguments = _attr(prompt, "arguments") or ()
+    return PromptDefinition(
+        name=str(_attr(prompt, "name", default="") or ""),
+        title=str(_attr(prompt, "title", default="") or ""),
+        description=str(_attr(prompt, "description", default="") or ""),
+        arguments=tuple(_as_dict(argument) for argument in arguments),
     )
 
 

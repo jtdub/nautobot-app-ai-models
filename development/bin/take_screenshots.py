@@ -43,7 +43,11 @@ LIST_VIEWS = (
     ("ai-models-list", "/plugins/ai-models/ai-models/"),
     ("mcp-servers-list", "/plugins/ai-models/mcp-servers/"),
     ("mcp-tools-list", "/plugins/ai-models/mcp-tools/"),
+    ("mcp-resources-list", "/plugins/ai-models/mcp-resources/"),
+    ("mcp-prompts-list", "/plugins/ai-models/mcp-prompts/"),
     ("ai-agents-list", "/plugins/ai-models/ai-agents/"),
+    ("ai-tool-approvals-list", "/plugins/ai-models/ai-tool-approvals/"),
+    ("ai-usage-records-list", "/plugins/ai-models/ai-usage-records/"),
 )
 """List views to capture whole. Each entry is a name and the path to visit."""
 
@@ -52,9 +56,14 @@ DETAIL_VIEWS = (
     ("ai-model-detail", "/plugins/ai-models/ai-models/", "gpt-4o-mini"),
     ("mcp-server-detail", "/plugins/ai-models/mcp-servers/", "Nautobot MCP"),
     ("mcp-tool-detail", "/plugins/ai-models/mcp-tools/", "get_device"),
+    ("mcp-prompt-detail", "/plugins/ai-models/mcp-prompts/", "triage_device"),
     ("ai-agent-detail", "/plugins/ai-models/ai-agents/", "Network Operations Assistant"),
 )
-"""Detail views to capture. Each entry is a name, a list path, and the search term that picks the row."""
+"""Detail views to capture. Each entry is a name, a list path, and the search term that picks the row.
+
+A binding is not here. The first link in its row is the agent, so this helper reaches the agent's
+page instead of the binding's own.
+"""
 
 
 def log(message):
@@ -130,10 +139,18 @@ def capture_embedded_modal(page, base_url, target):
 
 
 def capture_job_result(page, base_url, job_name, target):
-    """The most recent result of one named job, including its log."""
+    """The most recent result of one named job, including its log.
+
+    A fresh database holds no result. The capture is skipped in that case, so that one missing
+    result does not stop every other screenshot in the run.
+    """
     page.goto(f"{base_url}/extras/job-results/?q={job_name.replace(' ', '+')}")
     settle(page)
-    page.locator("table tbody tr a").first.click()
+    rows = page.locator("table tbody tr a")
+    if rows.count() == 0:
+        log(f"skipped {target.name}: no result for '{job_name}'. Run the job, then run this again.")
+        return
+    rows.first.click()
     settle(page)
     page.wait_for_timeout(1500)
     shot(page, target)

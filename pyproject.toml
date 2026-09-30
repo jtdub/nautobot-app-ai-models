@@ -139,9 +139,9 @@ ignore = ".venv"
 no-docstring-rgx = "^(_|test_|Meta$)"
 
 [tool.pylint.format]
-# `models.py` carries eleven models and their reasoning. Splitting it to satisfy a line
-# count would put one registry in two files for no reader's benefit.
-max-module-lines = 1600
+# `models.py` carries every model in the registry and the reasoning behind each one. Splitting
+# it to satisfy a line count would put one registry in two files for no reader's benefit.
+max-module-lines = 2400
 
 [tool.pylint.messages_control]
 disable = """,

@@ -6,6 +6,7 @@ against it.
 
 from django_filters import BooleanFilter
 from nautobot.apps.filters import (
+    BaseFilterSet,
     MultiValueCharFilter,
     MultiValueDateTimeFilter,
     NameSearchFilterSet,
@@ -24,7 +25,11 @@ from nautobot_ai_models.constants import (
     AI_AGENT_SUBAGENT_FIELDS,
     AI_AGENT_TOOL_FIELDS,
     AI_SKILL_FIELDS,
+    AI_TOOL_APPROVAL_FIELDS,
     AI_TOOL_DEFINITION_FIELDS,
+    AI_USAGE_RECORD_FIELDS,
+    MCP_PROMPT_DEFINITION_FIELDS,
+    MCP_RESOURCE_DEFINITION_FIELDS,
     MCP_SERVER_DISCOVERED_COLUMNS,
     MCP_SERVER_OPERATOR_FIELDS,
     MCP_TOOL_DEFINITION_FIELDS,
@@ -137,6 +142,65 @@ class MCPToolFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ancestors
         ]
 
 
+class MCPResourceFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ancestors
+    """Filter for MCPResource."""
+
+    q = SearchFilter(
+        filter_predicates={
+            "uri": "icontains",
+            "name": "icontains",
+            "title": "icontains",
+            "description": "icontains",
+        },
+    )
+    mcp_server = NaturalKeyOrPKMultipleChoiceFilter(
+        queryset=models.MCPServer.objects.all(),
+        to_field_name="name",
+        label="MCP server (name or ID)",
+    )
+    last_seen_at = MultiValueDateTimeFilter(label="Last seen")
+
+    class Meta:
+        """Meta attributes for filter."""
+
+        model = models.MCPResource
+        fields = [  # pylint: disable=nb-use-fields-all
+            "id",
+            *MCP_RESOURCE_DEFINITION_FIELDS,
+            "definition_fingerprint",
+            "last_seen_at",
+        ]
+
+
+class MCPPromptFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ancestors
+    """Filter for MCPPrompt."""
+
+    q = SearchFilter(
+        filter_predicates={
+            "name": "icontains",
+            "title": "icontains",
+            "description": "icontains",
+        },
+    )
+    mcp_server = NaturalKeyOrPKMultipleChoiceFilter(
+        queryset=models.MCPServer.objects.all(),
+        to_field_name="name",
+        label="MCP server (name or ID)",
+    )
+    last_seen_at = MultiValueDateTimeFilter(label="Last seen")
+
+    class Meta:
+        """Meta attributes for filter."""
+
+        model = models.MCPPrompt
+        fields = [  # pylint: disable=nb-use-fields-all
+            "id",
+            *MCP_PROMPT_DEFINITION_FIELDS,
+            "definition_fingerprint",
+            "last_seen_at",
+        ]
+
+
 class AIToolFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ancestors
     """Filter for AITool.
 
@@ -225,6 +289,48 @@ class AIAgentToolFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ances
         fields = list(AI_AGENT_TOOL_FIELDS)  # pylint: disable=nb-use-fields-all
 
 
+class AIToolApprovalFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ancestors
+    """Filter for AIToolApproval.
+
+    ``revoked_at__isnull=True`` with an ``expires_at`` range is the query that matters: every
+    approval still standing, and every one about to lapse.
+    """
+
+    q = SearchFilter(
+        filter_predicates={
+            "binding__agent__name": "icontains",
+            "approved_by_name": "icontains",
+            "note": "icontains",
+        }
+    )
+    binding = NaturalKeyOrPKMultipleChoiceFilter(
+        queryset=models.AIAgentTool.objects.all(),
+        to_field_name="pk",
+        label="AI Agent Tool",
+    )
+    agent = NaturalKeyOrPKMultipleChoiceFilter(
+        field_name="binding__agent",
+        queryset=models.AIAgent.objects.all(),
+        to_field_name="name",
+        label="AI Agent (name or ID)",
+    )
+    approved_at = MultiValueDateTimeFilter(label="Approved")
+    expires_at = MultiValueDateTimeFilter(label="Expires")
+    revoked_at = MultiValueDateTimeFilter(label="Revoked")
+    is_revoked = BooleanFilter(
+        field_name="revoked_at",
+        lookup_expr="isnull",
+        exclude=True,
+        label="Withdrawn",
+    )
+
+    class Meta:
+        """Meta attributes for filter."""
+
+        model = models.AIToolApproval
+        fields = list(AI_TOOL_APPROVAL_FIELDS)  # pylint: disable=nb-use-fields-all
+
+
 class AIAgentSubagentFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ancestors
     """Filter for AIAgentSubagent."""
 
@@ -283,6 +389,31 @@ class AIAgentSkillFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ance
 
         model = models.AIAgentSkill
         fields = list(AI_AGENT_SKILL_FIELDS)  # pylint: disable=nb-use-fields-all
+
+
+class AIUsageRecordFilterSet(BaseFilterSet):  # pylint: disable=too-many-ancestors
+    """Filter for AIUsageRecord.
+
+    This is a `BaseFilterSet` and not a `NautobotFilterSet`: the model carries no custom fields, no
+    tags, and no relationships, so the extra filters those add would all be empty.
+    """
+
+    agent = NaturalKeyOrPKMultipleChoiceFilter(
+        queryset=models.AIAgent.objects.all(),
+        to_field_name="name",
+        label="AI Agent (name or ID)",
+    )
+    model = NaturalKeyOrPKMultipleChoiceFilter(
+        queryset=models.AIModel.objects.all(),
+        label="AI Model",
+    )
+    recorded_at = MultiValueDateTimeFilter(label="Recorded")
+
+    class Meta:
+        """Meta attributes for filter."""
+
+        model = models.AIUsageRecord
+        fields = list(AI_USAGE_RECORD_FIELDS)  # pylint: disable=nb-use-fields-all
 
 
 class AIAgentThreadFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ancestors

@@ -1,0 +1,63 @@
+---
+# sdlc-crew configuration. The sdlc-setup skill writes this file for you.
+# You can also edit it by hand. Every key has a default, so you can delete a key
+# that you do not need.
+
+version: 1
+
+# Who uses the workflow. This changes how much the personas explain.
+#   new          - explain every term, offer fewer options, add safety steps
+#   some         - explain uncommon terms only
+#   professional - assume a software developer
+person:
+  experience: "professional"
+
+# Where the work items live.
+#   local     - a BACKLOG.md file in this repository (no account needed)
+#   github    - GitHub Issues of the repository in forge.repo
+#   gitlab    - GitLab Issues of the project in tracker.project
+#   jira      - Jira Cloud or Jira Server; tracker.url and tracker.project are required
+#   bitbucket - Bitbucket Cloud issues of the repository in forge.repo
+tracker:
+  kind: "github"
+  url: ""
+  project: ""
+  statuses:
+    todo: "To Do"
+    in_progress: "In Progress"
+    in_review: "In Review"
+    done: "Done"
+  child_issue_type: "Subtask"
+
+# Where the code and the pull requests live.
+#   github | gitlab | bitbucket | none
+# With none, the workflow makes branches and commits but opens no pull request.
+forge:
+  kind: "github"
+  repo: "jtdub/nautobot-app-ai-models"
+  default_branch: "develop"
+  branch_pattern: "sdlc/{id}-{slug}"
+  assign_to_me: true
+
+# Which model each role uses. The value is a model name that your harness accepts,
+# or "inherit" for the model of the current session.
+#   plan   - the architect
+#   build  - the engineer
+#   review - QA, UX, and the sdlc-review skill
+models:
+  plan: "inherit"
+  build: "inherit"
+  review: "inherit"
+
+# How to run and test the project. Leave a value empty if the project has none yet.
+project:
+  run_command: "invoke start"
+  test_command: "invoke unittest"
+  app_url: "http://localhost:8080"
+  changelog: "towncrier"
+  screenshots: "pr-comment"
+
+# Limits that keep a change reviewable.
+limits:
+  max_pr_lines: 500
+  max_qa_rounds: 3
