@@ -572,6 +572,7 @@ class AIAgentToolForm(NautobotModelForm):  # pylint: disable=too-many-ancestors
 
         model = models.AIAgentTool
         fields = list(AI_AGENT_TOOL_FIELDS)  # pylint: disable=nb-use-fields-all
+        exclude_embedded_create = ["ai_tool"]
 
 
 class AIAgentToolBulkEditForm(NautobotBulkEditForm):  # pylint: disable=too-many-ancestors
