@@ -14,24 +14,8 @@ from nautobot_ai_models.tests import fixtures
 from nautobot_ai_models.tests.scaffolding import (
     COMMON_FILTER_TESTS,
     COMMON_FILTER_TESTS_WITH_DESCRIPTION,
+    spare_agent,
 )
-
-
-def _spare_agent(name):
-    """Create an agent with no bindings, so every target pair is free.
-
-    Args:
-        name: The agent's name.
-
-    Returns:
-        AIAgent: The saved agent.
-    """
-    return models.AIAgent.objects.create(
-        name=name,
-        description=f"{name}. Give it a hostname.",
-        system_prompt="You answer from tools only.",
-        model=models.AIModel.objects.filter(kind=AIModelKindChoices.CHAT).first(),
-    )
 
 
 class AIProviderFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=too-many-ancestors
@@ -238,7 +222,7 @@ class MCPResourceFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disa
         super().setUpTestData()
         fixtures.create_mcpresource()
         fixtures.create_aimodel()
-        agent = _spare_agent("Resource Bound Agent")
+        agent = spare_agent("Resource Bound Agent")
         models.AIAgentTool.objects.create(agent=agent, mcp_resource=models.MCPResource.objects.first())
 
     def test_filtering_by_server(self):
@@ -258,7 +242,7 @@ class MCPResourceFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disa
 
     def test_has_agents_separates_the_bound_resources(self):
         """The panel on the resource page asks which agents may use it."""
-        agent = _spare_agent("Resource Has Agents Agent")
+        agent = spare_agent("Resource Has Agents Agent")
         resource = fixtures.create_mcpresource()[-1]
         models.AIAgentTool.objects.create(agent=agent, mcp_resource=resource)
         bound = {binding.mcp_resource_id for binding in models.AIAgentTool.objects.exclude(mcp_resource_id=None)}
@@ -283,7 +267,7 @@ class MCPPromptFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disabl
         super().setUpTestData()
         fixtures.create_mcpprompt()
         fixtures.create_aimodel()
-        agent = _spare_agent("Prompt Bound Agent")
+        agent = spare_agent("Prompt Bound Agent")
         models.AIAgentTool.objects.create(agent=agent, mcp_prompt=models.MCPPrompt.objects.first())
 
     def test_filtering_by_server(self):
@@ -296,7 +280,7 @@ class MCPPromptFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disabl
 
     def test_has_agents_separates_the_bound_prompts(self):
         """The panel on the prompt page asks which agents may use it."""
-        agent = _spare_agent("Prompt Has Agents Agent")
+        agent = spare_agent("Prompt Has Agents Agent")
         prompt = fixtures.create_mcpprompt()[-1]
         models.AIAgentTool.objects.create(agent=agent, mcp_prompt=prompt)
         bound = {binding.mcp_prompt_id for binding in models.AIAgentTool.objects.exclude(mcp_prompt_id=None)}
@@ -388,7 +372,7 @@ class AIAgentToolFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disa
         """Set up test data for the AIAgentTool model."""
         super().setUpTestData()
         fixtures.create_aiagenttool()
-        agent = _spare_agent("Filter Target Agent")
+        agent = spare_agent("Filter Target Agent")
         prompt = fixtures.create_mcpprompt()[0]
         resource = fixtures.create_mcpresource()[0]
         models.AIAgentTool.objects.create(agent=agent, mcp_prompt=prompt)

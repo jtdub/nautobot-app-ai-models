@@ -74,4 +74,4 @@ description a rewritten tool advertises.
 An override on the binding moves the digest as well. `name_override` and `description_override` are
 what the model is told, so a change to either needs a new review.
 
-See [AI Agent Tool](aiagenttool.md#four-values-the-model-actually-reads).
+See [AI Agent Tool](aiagenttool.md#values-the-model-actually-reads).

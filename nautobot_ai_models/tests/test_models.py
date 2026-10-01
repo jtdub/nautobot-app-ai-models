@@ -22,23 +22,7 @@ from nautobot_ai_models.choices import (
 )
 from nautobot_ai_models.services import usage
 from nautobot_ai_models.tests import fixtures
-
-
-def _spare_agent(name):
-    """Create an agent with no tool bindings, so every target pair is free.
-
-    Args:
-        name: The agent's name.
-
-    Returns:
-        AIAgent: The saved agent.
-    """
-    return models.AIAgent.objects.create(
-        name=name,
-        description=f"{name}. Give it a hostname.",
-        system_prompt="You answer from tools only.",
-        model=models.AIModel.objects.filter(kind=AIModelKindChoices.CHAT).first(),
-    )
+from nautobot_ai_models.tests.scaffolding import spare_agent
 
 
 class TestAIProvider(ModelTestCases.BaseModelTestCase):
@@ -865,7 +849,7 @@ class TestAIAgentTool(ModelTestCases.BaseModelTestCase):
 
     def test_a_binding_names_exactly_one_of_four_targets(self):
         """A prompt or a resource is a target, and two targets are still one too many."""
-        agent = _spare_agent("Four Targets Agent")
+        agent = spare_agent("Four Targets Agent")
         prompt = fixtures.create_mcpprompt()[0]
         resource = fixtures.create_mcpresource()[0]
 
@@ -883,7 +867,7 @@ class TestAIAgentTool(ModelTestCases.BaseModelTestCase):
 
     def test_target_returns_the_prompt_or_the_resource(self):
         """Whatever kind the binding names, `target` answers every question."""
-        agent = _spare_agent("Target Agent")
+        agent = spare_agent("Target Agent")
         prompt = fixtures.create_mcpprompt()[0]
         resource = fixtures.create_mcpresource()[0]
         prompt_binding = models.AIAgentTool(agent=agent, mcp_prompt=prompt)
@@ -894,7 +878,7 @@ class TestAIAgentTool(ModelTestCases.BaseModelTestCase):
 
     def test_mcp_kind_reports_which_mcp_call_to_make(self):
         """A consuming app reads this to pick tool, prompt, resource, or none."""
-        agent = _spare_agent("MCP Kind Agent")
+        agent = spare_agent("MCP Kind Agent")
         mcp_tool = models.MCPTool.objects.first()
         ai_tool = models.AITool.objects.first()
         prompt = fixtures.create_mcpprompt()[0]
@@ -916,7 +900,7 @@ class TestAIAgentTool(ModelTestCases.BaseModelTestCase):
 
     def test_a_resource_binding_with_a_blank_name_and_override_is_refused(self):
         """Without a name the model could not say which resource it meant."""
-        agent = _spare_agent("Blank Resource Agent")
+        agent = spare_agent("Blank Resource Agent")
         resource = fixtures.create_mcpresource()[0]
         resource.name = ""
         binding = models.AIAgentTool(agent=agent, mcp_resource=resource)
@@ -929,7 +913,7 @@ class TestAIAgentTool(ModelTestCases.BaseModelTestCase):
 
     def test_a_prompt_or_resource_binding_is_read_only(self):
         """Neither changes anything, so an approval can never approve a write."""
-        agent = _spare_agent("Read Only Agent")
+        agent = spare_agent("Read Only Agent")
         prompt_binding = models.AIAgentTool(agent=agent, mcp_prompt=fixtures.create_mcpprompt()[0])
         resource_binding = models.AIAgentTool(agent=agent, mcp_resource=fixtures.create_mcpresource()[0])
 
@@ -938,7 +922,7 @@ class TestAIAgentTool(ModelTestCases.BaseModelTestCase):
 
     def test_a_bound_prompt_is_protected_from_delete(self):
         """A prompt an agent is bound to is not tidied away by accident."""
-        agent = _spare_agent("Protected Prompt Agent")
+        agent = spare_agent("Protected Prompt Agent")
         prompt = fixtures.create_mcpprompt()[0]
         models.AIAgentTool.objects.create(agent=agent, mcp_prompt=prompt)
 
@@ -947,7 +931,7 @@ class TestAIAgentTool(ModelTestCases.BaseModelTestCase):
 
     def test_the_fingerprint_moves_when_prompt_arguments_change(self):
         """An approval must not survive a definition that changed under it."""
-        agent = _spare_agent("Fingerprint Agent")
+        agent = spare_agent("Fingerprint Agent")
         prompt = fixtures.create_mcpprompt()[0]
         binding = models.AIAgentTool.objects.create(agent=agent, mcp_prompt=prompt)
         before = binding.fingerprint

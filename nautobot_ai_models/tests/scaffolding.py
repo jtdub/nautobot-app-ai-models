@@ -4,6 +4,9 @@ MCPTool is absent from the API helper: its payloads carry no description and its
 exercises a different field.
 """
 
+from nautobot_ai_models import models
+from nautobot_ai_models.choices import AIModelKindChoices
+
 COMMON_FILTER_TESTS = (
     ("id",),
     ("created",),
@@ -14,6 +17,26 @@ COMMON_FILTER_TESTS = (
 COMMON_FILTER_TESTS_WITH_DESCRIPTION = (*COMMON_FILTER_TESTS, ("description",))
 
 CREATE_LABELS = ("One", "Two", "Three")
+
+
+def spare_agent(name):
+    """Create an agent with no bindings, so every target pair is free.
+
+    Every pair the fixtures make is already taken, and each binding model allows one row per pair.
+    A fresh agent leaves every pair free.
+
+    Args:
+        name: The agent's name.
+
+    Returns:
+        AIAgent: The saved agent.
+    """
+    return models.AIAgent.objects.create(
+        name=name,
+        description=f"{name}. Give it a hostname.",
+        system_prompt="You answer from tools only.",
+        model=models.AIModel.objects.filter(kind=AIModelKindChoices.CHAT).first(),
+    )
 
 
 class RegistryAPIPayloadsMixin:  # pylint: disable=too-few-public-methods
