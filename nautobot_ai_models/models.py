@@ -1255,6 +1255,22 @@ class AIAgent(PrimaryModel):  # pylint: disable=too-many-ancestors
                 }
             )
 
+        if self.fallback_bindings.filter(model_id=self.model_id).exists():
+            raise ValidationError(
+                {"model": ("The agent's primary model cannot also be a fallback. Remove it from " "Fallback models.")}
+            )
+
+        bad_fallback = self.fallback_bindings.filter(model__supports_tools=False).first()
+        if bad_fallback is not None and (self.tool_bindings.exists() or self.subagent_bindings.exists()):
+            raise ValidationError(
+                {
+                    "model": (
+                        f"Fallback model '{bad_fallback.model}' is recorded as unable to call a "
+                        "tool, and this agent has tools or subagents bound to it."
+                    )
+                }
+            )
+
         was = AIAgent.objects.filter(pk=self.pk).values_list("pattern", flat=True).first()
         if self.pattern == was:
             return
@@ -2033,6 +2049,108 @@ class AIAgentSkill(OrganizationalModel):  # pylint: disable=too-many-ancestors
             bool: True when the agent and the skill are both available.
         """
         return self.agent.is_available and self.skill.is_available  # pylint: disable=no-member
+
+
+@extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
+class AIAgentFallback(OrganizationalModel):  # pylint: disable=too-many-ancestors
+    """One fallback chat model an agent moves to when its primary fails.
+
+    The order is the point. The row is not named `AIAgentModel`, because that reads as the primary
+    model.
+    """
+
+    is_dynamic_group_associable_model = False
+
+    agent = models.ForeignKey(
+        to="nautobot_ai_models.AIAgent",
+        on_delete=models.CASCADE,
+        related_name="fallback_bindings",
+        verbose_name="AI Agent",
+    )
+    model = models.ForeignKey(
+        to="nautobot_ai_models.AIModel",
+        on_delete=models.PROTECT,
+        related_name="fallback_bindings",
+        verbose_name="AI Model",
+    )
+    weight = models.PositiveIntegerField(
+        default=DEFAULT_BINDING_WEIGHT,
+        help_text="The order models are tried in. Lower comes first.",
+    )
+
+    class Meta:
+        """Meta class."""
+
+        ordering = ["agent__name", "weight", "pk"]
+        verbose_name = "AI Agent Fallback"
+        verbose_name_plural = "AI Agent Fallbacks"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "model"],
+                name="nautobot_ai_models_aiagentfallback_unique_agent_model",
+            ),
+        ]
+
+    def __str__(self):
+        """Stringify instance."""
+        return f"{self.agent.name}: {self.model.name}"
+
+    def clean(self):
+        """Check that the fallback can take the primary's place.
+
+        A fallback answers the same questions as the primary, so the same two rules apply: it has
+        to be a chat model, and it has to be able to call a tool when this agent binds tools.
+
+        Raises:
+            ValidationError: The model is not a chat model, it is the agent's primary model, or it
+                cannot call a tool while the agent binds tools or subagents.
+        """
+        super().clean()
+
+        # pylint: disable=no-member
+        if self.model_id is not None and self.model.kind != AIModelKindChoices.CHAT:
+            raise ValidationError(
+                {
+                    "model": (
+                        f"A fallback has to be a chat model. '{self.model}' is registered as "
+                        f"{self.model.get_kind_display()}."
+                    )
+                }
+            )
+        if self.agent_id is not None and self.model_id is not None and self.model_id == self.agent.model_id:
+            raise ValidationError(
+                {
+                    "model": (
+                        "The agent's primary model cannot also be its fallback. This agent already "
+                        f"runs on '{self.model}'."
+                    )
+                }
+            )
+        if (
+            self.agent_id is not None
+            and self.agent.present_in_database
+            and self.model_id is not None
+            and self.model.supports_tools is False
+        ):
+            binds_tools = self.agent.tool_bindings.exists() or self.agent.subagent_bindings.exists()
+            if binds_tools:
+                raise ValidationError(
+                    {
+                        "model": (
+                            f"'{self.model}' is recorded as unable to call a tool, and this agent has "
+                            "tools or subagents bound to it."
+                        )
+                    }
+                )
+
+    @property
+    def is_available(self):
+        """Whether this fallback can answer for this agent.
+
+        Returns:
+            bool: True when the agent and the model are both available.
+        """
+        return self.agent.is_available and self.model.is_available  # pylint: disable=no-member
 
 
 @extras_features("export_templates", "graphql")

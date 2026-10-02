@@ -127,6 +127,7 @@ nav:
           - AI Tool Approval: "models/aitoolapproval.md"
           - AI Agent Subagent: "models/aiagentsubagent.md"
           - AI Agent Skill: "models/aiagentskill.md"
+          - AI Agent Fallback: "models/aiagentfallback.md"
           - AI Agent Thread: "models/aiagentthread.md"
           - AI Usage Record: "models/aiusagerecord.md"
   - Administrator Guide:

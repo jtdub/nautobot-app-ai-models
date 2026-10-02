@@ -17,6 +17,7 @@ from nautobot.extras.models import Job
 from nautobot_ai_models import filters, forms, models, tables
 from nautobot_ai_models.api import serializers
 from nautobot_ai_models.constants import (
+    AI_AGENT_FALLBACK_FIELDS,
     AI_AGENT_FIELDS,
     AI_AGENT_SKILL_FIELDS,
     AI_AGENT_SUBAGENT_FIELDS,
@@ -101,6 +102,15 @@ class AIModelUIViewSet(NautobotUIViewSet):
                 label="Default Parameters",
                 object_field="default_parameters",
                 render_as=ObjectTextPanel.RenderOptions.JSON,
+            ),
+            ObjectsTablePanel(
+                weight=400,
+                section=SectionChoices.FULL_WIDTH,
+                table_class=tables.AIAgentFallbackTable,
+                table_filter="model",
+                select_related_fields=["agent", "model"],
+                related_field_name="model",
+                table_title="Agents that fall back to this",
             ),
         ],
     )
@@ -484,6 +494,15 @@ class AIAgentUIViewSet(NautobotUIViewSet):
                 related_field_name="agent",
                 table_title="Skills",
             ),
+            ObjectsTablePanel(
+                weight=600,
+                section=SectionChoices.FULL_WIDTH,
+                table_class=tables.AIAgentFallbackTable,
+                table_filter="agent",
+                select_related_fields=["agent", "model"],
+                related_field_name="agent",
+                table_title="Fallback models",
+            ),
         ],
     )
 
@@ -671,6 +690,30 @@ class AIAgentSkillUIViewSet(NautobotUIViewSet):
                 section=SectionChoices.FULL_WIDTH,
                 label="Binding",
                 fields=list(AI_AGENT_SKILL_FIELDS),
+            ),
+        ],
+    )
+
+
+class AIAgentFallbackUIViewSet(NautobotUIViewSet):
+    """ViewSet for AI Agent Fallback views."""
+
+    bulk_update_form_class = forms.AIAgentFallbackBulkEditForm
+    filterset_class = filters.AIAgentFallbackFilterSet
+    filterset_form_class = forms.AIAgentFallbackFilterForm
+    form_class = forms.AIAgentFallbackForm
+    lookup_field = "pk"
+    queryset = models.AIAgentFallback.objects.select_related("agent", "model")
+    serializer_class = serializers.AIAgentFallbackSerializer
+    table_class = tables.AIAgentFallbackTable
+
+    object_detail_content = ObjectDetailContent(
+        panels=[
+            ObjectFieldsPanel(
+                weight=100,
+                section=SectionChoices.FULL_WIDTH,
+                label="Binding",
+                fields=list(AI_AGENT_FALLBACK_FIELDS),
             ),
         ],
     )

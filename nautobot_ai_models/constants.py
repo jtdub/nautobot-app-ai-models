@@ -236,6 +236,12 @@ AI_AGENT_SKILL_FIELDS = (
     "weight",
 )
 
+AI_AGENT_FALLBACK_FIELDS = (
+    "agent",
+    "model",
+    "weight",
+)
+
 AI_AGENT_THREAD_FIELDS = (
     "agent",
     "thread_id",

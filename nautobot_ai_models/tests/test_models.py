@@ -783,6 +783,25 @@ class TestAIAgent(ModelTestCases.BaseModelTestCase):
         with self.assertRaises(ProtectedError):
             agent.model.delete()  # pylint: disable=no-member
 
+    def test_the_primary_model_cannot_also_be_a_fallback(self):
+        """A model cannot answer for the same agent in both seats."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        models.AIAgentFallback.objects.create(agent=agent, model=agent.model)
+        with self.assertRaises(ValidationError) as raised:
+            agent.full_clean()
+        self.assertIn("model", raised.exception.message_dict)
+
+    def test_a_fallback_that_cannot_call_a_tool_is_refused_for_an_agent_with_tools(self):
+        """The same tool-capability rule as the primary, applied to a fallback."""
+        agent = fixtures.create_aiagenttool()[0].agent
+        fallback_model = models.AIModel.objects.exclude(pk=agent.model_id).filter(kind=AIModelKindChoices.CHAT).first()
+        fallback_model.supports_tools = False
+        fallback_model.validated_save()
+        models.AIAgentFallback.objects.create(agent=agent, model=fallback_model)
+        with self.assertRaises(ValidationError) as raised:
+            agent.full_clean()
+        self.assertIn("model", raised.exception.message_dict)
+
 
 class TestAIAgentTool(ModelTestCases.BaseModelTestCase):
     """Test AIAgentTool."""
@@ -1132,6 +1151,66 @@ class TestAIAgentSkill(ModelTestCases.BaseModelTestCase):
         binding = models.AIAgentSkill.objects.first()
         with self.assertRaises(IntegrityError):
             models.AIAgentSkill.objects.create(agent=binding.agent, skill=binding.skill)
+
+
+class TestAIAgentFallback(ModelTestCases.BaseModelTestCase):
+    """Test AIAgentFallback."""
+
+    model = models.AIAgentFallback
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create an agent with tools and one fallback binding."""
+        super().setUpTestData()
+        fixtures.create_aiagenttool()
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        fallback = models.AIModel.objects.exclude(pk=agent.model_id).filter(kind=AIModelKindChoices.CHAT).first()
+        models.AIAgentFallback.objects.create(agent=agent, model=fallback)
+
+    def test_a_fallback_is_bound_to_an_agent_once(self):
+        """Twice would list the same model twice in the fallback chain."""
+        binding = models.AIAgentFallback.objects.first()
+        with self.assertRaises(IntegrityError):
+            models.AIAgentFallback.objects.create(agent=binding.agent, model=binding.model)
+
+    def test_a_bound_model_is_protected_from_delete(self):
+        """Deleting a catalog row must not silently drop a fallback."""
+        binding = models.AIAgentFallback.objects.first()
+        with self.assertRaises(ProtectedError):
+            binding.model.delete()  # pylint: disable=no-member
+
+    def test_a_non_chat_model_is_refused(self):
+        """A fallback answers, so it has to be a chat model."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        embedding = models.AIModel.objects.filter(kind=AIModelKindChoices.EMBEDDING).first()
+        with self.assertRaises(ValidationError):
+            models.AIAgentFallback(agent=agent, model=embedding).full_clean()
+
+    def test_the_primary_model_cannot_be_a_fallback(self):
+        """A model cannot answer for the same agent in both seats."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        with self.assertRaises(ValidationError) as raised:
+            models.AIAgentFallback(agent=agent, model=agent.model).full_clean()
+        self.assertIn("model", raised.exception.message_dict)
+
+    def test_a_tool_incapable_fallback_is_refused_for_an_agent_with_tools(self):
+        """The fallback would break the same build the primary would."""
+        agent = fixtures.create_aiagenttool()[0].agent
+        fallback_model = models.AIModel.objects.exclude(pk=agent.model_id).filter(kind=AIModelKindChoices.CHAT).first()
+        fallback_model.supports_tools = False
+        fallback_model.validated_save()
+        with self.assertRaises(ValidationError) as raised:
+            models.AIAgentFallback(agent=agent, model=fallback_model).full_clean()
+        self.assertIn("model", raised.exception.message_dict)
+
+    def test_is_available_follows_the_agent_and_the_model(self):
+        """One answer, read from the two rows it depends on."""
+        binding = models.AIAgentFallback.objects.first()
+        self.assertTrue(binding.is_available)
+        binding.model.enabled = False
+        binding.model.validated_save()
+        binding.refresh_from_db()
+        self.assertFalse(binding.is_available)
 
 
 class TestAIUsageRecord(TestCase):

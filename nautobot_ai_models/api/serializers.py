@@ -225,6 +225,16 @@ class AIAgentSkillSerializer(NautobotModelSerializer):  # pylint: disable=too-ma
         fields = "__all__"
 
 
+class AIAgentFallbackSerializer(NautobotModelSerializer):  # pylint: disable=too-many-ancestors
+    """AI Agent Fallback Serializer."""
+
+    class Meta:
+        """Meta attributes."""
+
+        model = models.AIAgentFallback
+        fields = "__all__"
+
+
 class AIUsageRecordSerializer(ValidatedModelSerializer):  # pylint: disable=too-many-ancestors
     """AI Usage Record Serializer.
 

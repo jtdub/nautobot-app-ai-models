@@ -33,6 +33,7 @@ from nautobot_ai_models.choices import (
     SubagentInputModeChoices,
 )
 from nautobot_ai_models.constants import (
+    AI_AGENT_FALLBACK_FIELDS,
     AI_AGENT_FIELDS,
     AI_AGENT_SKILL_FIELDS,
     AI_AGENT_SUBAGENT_FIELDS,
@@ -774,6 +775,55 @@ class AIAgentSkillFilterForm(NautobotFilterForm):  # pylint: disable=too-many-an
     q = forms.CharField(required=False, label="Search", help_text="Search within the agent's or the skill's name.")
     agent = DynamicModelMultipleChoiceField(queryset=models.AIAgent.objects.all(), required=False, label="AI Agent")
     skill = DynamicModelMultipleChoiceField(queryset=models.AISkill.objects.all(), required=False, label="AI Skill")
+
+
+class AIAgentFallbackForm(NautobotModelForm):  # pylint: disable=too-many-ancestors
+    """Binding one fallback model to one agent."""
+
+    agent = DynamicModelChoiceField(queryset=models.AIAgent.objects.all(), label="AI Agent")
+    model = DynamicModelChoiceField(queryset=models.AIModel.objects.all(), label="AI Model")
+
+    class Meta:
+        """Meta attributes."""
+
+        model = models.AIAgentFallback
+        fields = list(AI_AGENT_FALLBACK_FIELDS)  # pylint: disable=nb-use-fields-all
+
+
+class AIAgentFallbackBulkEditForm(NautobotBulkEditForm):  # pylint: disable=too-many-ancestors
+    """Bulk editing fallback bindings."""
+
+    pk = forms.ModelMultipleChoiceField(queryset=models.AIAgentFallback.objects.all(), widget=forms.MultipleHiddenInput)
+    weight = forms.IntegerField(required=False, min_value=0)
+
+    class Meta:
+        """Meta attributes."""
+
+        nullable_fields = []
+
+
+class AIAgentFallbackFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancestors
+    """Filtering fallback bindings.
+
+    `AIAgentFallback.model` collides with the `model` attribute that a filter form uses to name its
+    content type, so `__init__` adds the field for that foreign key instead.
+    """
+
+    model = models.AIAgentFallback
+    field_order = ["q", "agent", "model"]
+
+    q = forms.CharField(required=False, label="Search", help_text="Search within the agent's or the model's name.")
+    agent = DynamicModelMultipleChoiceField(queryset=models.AIAgent.objects.all(), required=False, label="AI Agent")
+
+    def __init__(self, *args, **kwargs):
+        """Add the AI Model field, which cannot be declared on the class."""
+        super().__init__(*args, **kwargs)
+        self.fields["model"] = DynamicModelMultipleChoiceField(
+            queryset=models.AIModel.objects.all(),
+            required=False,
+            label="AI Model",
+        )
+        self.order_fields(self.field_order)
 
 
 class AIUsageRecordFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancestors

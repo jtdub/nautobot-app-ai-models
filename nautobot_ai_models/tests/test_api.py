@@ -18,7 +18,7 @@ from nautobot_ai_models.choices import (
     SubagentInputModeChoices,
 )
 from nautobot_ai_models.tests import fixtures
-from nautobot_ai_models.tests.scaffolding import RegistryAPIPayloadsMixin
+from nautobot_ai_models.tests.scaffolding import RegistryAPIPayloadsMixin, spare_agent
 
 
 class AIProviderAPIViewTest(RegistryAPIPayloadsMixin, APIViewTestCases.APIViewTestCase):
@@ -417,6 +417,24 @@ class AIAgentSkillAPIViewTest(APIViewTestCases.APIViewTestCase):
         agent = models.AIAgent.objects.get(name="Test Inventory Specialist")
         skills = list(models.AISkill.objects.order_by("name"))
         cls.create_data = [{"agent": agent.pk, "skill": skill.pk} for skill in skills]
+        cls.update_data = {"weight": 175}
+
+
+class AIAgentFallbackAPIViewTest(APIViewTestCases.APIViewTestCase):
+    # pylint: disable=too-many-ancestors
+    """Test the API viewsets for AIAgentFallback."""
+
+    model = models.AIAgentFallback
+    bulk_update_data = {"weight": 250}
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AIAgentFallback API viewset."""
+        super().setUpTestData()
+        fixtures.create_aiagentfallback()
+        agent = spare_agent("API Test Fallback Agent")
+        spare = models.AIModel.objects.exclude(pk=agent.model_id).filter(kind=AIModelKindChoices.CHAT).first()
+        cls.create_data = [{"agent": agent.pk, "model": spare.pk, "weight": 100}]
         cls.update_data = {"weight": 175}
 
 
