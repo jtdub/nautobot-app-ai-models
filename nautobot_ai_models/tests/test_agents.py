@@ -9,6 +9,7 @@ it, or asserts the refusal a deployment without the extra gets.
 
 import ast
 import uuid
+from decimal import Decimal
 from pathlib import Path
 from unittest import mock
 
@@ -17,7 +18,15 @@ from nautobot.apps.testing import TestCase
 from nautobot.extras.models import Job
 
 from nautobot_ai_models.choices import AIProviderTypeChoices, MCPTransportChoices
-from nautobot_ai_models.models import AIAgent, AIAgentTool, AITool, MCPPrompt, MCPResource
+from nautobot_ai_models.models import (
+    AIAgent,
+    AIAgentFallback,
+    AIAgentTool,
+    AIModel,
+    AITool,
+    MCPPrompt,
+    MCPResource,
+)
 from nautobot_ai_models.services import agents
 from nautobot_ai_models.tests import fixtures
 
@@ -230,6 +239,106 @@ class MCPBindingsTest(TestCase):
 
         with mock.patch.object(agents, "require_langchain", return_value=(None, tool)):
             self.assertEqual(agents.resolve_tools(agent), [])
+
+
+class FallbackModelsTest(TestCase):
+    """A built agent moves to a fallback model when the primary fails."""
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create an agent with one fallback binding and one spare chat model."""
+        fixtures.create_aiagent()
+        agent = AIAgent.objects.get(name="Test Supervisor")
+        fallback = AIModel.objects.exclude(pk=agent.model_id).filter(kind="chat").first()
+        AIAgentFallback.objects.create(agent=agent, model=fallback)
+        cls.spare = AIModel.objects.create(
+            provider=fallback.provider,
+            name="Test Fallback Spare",
+            description="A second fallback for the order test.",
+            kind="chat",
+        )
+
+    def test_fallback_models_return_the_available_bindings_in_weight_order(self):
+        """Lower weight comes first, the same rule as every other binding."""
+        agent = AIAgent.objects.get(name="Test Supervisor")
+        first = AIAgentFallback.objects.first()
+        second = AIAgentFallback.objects.create(agent=agent, model=self.spare, weight=50)
+
+        self.assertEqual([binding.pk for binding in agents.fallback_models(agent)], [second.pk, first.pk])
+
+    def test_fallback_models_skip_an_unavailable_binding(self):
+        """A disabled model is left out, as `tool_bindings` leaves out a disabled tool."""
+        agent = AIAgent.objects.get(name="Test Supervisor")
+        binding = AIAgentFallback.objects.first()
+        binding.model.enabled = False
+        binding.model.save()
+
+        self.assertEqual(agents.fallback_models(agent), [])
+
+    def test_generation_overrides_prefer_the_agent_tuning_else_the_model(self):
+        """A fallback gets the agent's own values, not the primary model's."""
+        agent = AIAgent.objects.get(name="Test Supervisor")
+        fallback = AIAgentFallback.objects.first().model
+        agent.temperature = Decimal("0.40")
+        agent.num_predict = 99
+
+        self.assertEqual(
+            agents._generation_overrides(fallback, agent),  # pylint: disable=protected-access
+            {"temperature": 0.4, "max_tokens": 99},
+        )
+
+        agent.temperature = None
+        agent.num_predict = None
+        fallback.temperature = Decimal("0.70")
+        fallback.num_predict = 42
+        fallback.save()
+
+        self.assertEqual(
+            agents._generation_overrides(fallback, agent),  # pylint: disable=protected-access
+            {"temperature": 0.7, "max_tokens": 42},
+        )
+
+    def test_build_agent_passes_the_fallback_middleware(self):
+        """The primary stays as `model=`, and the fallbacks ride in the middleware."""
+        agent = AIAgent.objects.get(name="Test Supervisor")
+        fallback = AIAgentFallback.objects.first().model
+        captured = {}
+        primary_client = mock.Mock()
+        fallback_client = mock.Mock()
+
+        def fake_create_agent(**kwargs):
+            captured.update(kwargs)
+            return "agent"
+
+        def fake_chat_model_for(model, **kwargs):
+            if model == agent.model:
+                return primary_client
+            return fallback_client
+
+        with mock.patch.object(agents, "require_langchain", return_value=(fake_create_agent, mock.Mock())):
+            with mock.patch.object(agents, "chat_model_for", side_effect=fake_chat_model_for):
+                agents.build_agent(agent)
+
+        self.assertIs(captured["model"], primary_client)
+        self.assertEqual(len(captured["middleware"]), 1)
+        self.assertEqual(captured["middleware"][0].models, [fallback_client])
+
+    def test_build_agent_passes_no_middleware_without_fallbacks(self):
+        """An agent with no fallbacks builds exactly as before."""
+        agent = AIAgent.objects.get(name="Test Skills Agent")
+        captured = {}
+        primary_client = mock.Mock()
+
+        def fake_create_agent(**kwargs):
+            captured.update(kwargs)
+            return "agent"
+
+        with mock.patch.object(agents, "require_langchain", return_value=(fake_create_agent, mock.Mock())):
+            with mock.patch.object(agents, "chat_model_for", return_value=primary_client):
+                agents.build_agent(agent)
+
+        self.assertEqual(captured["middleware"], ())
+        self.assertIs(captured["model"], primary_client)
 
 
 class RefusalTest(TestCase):

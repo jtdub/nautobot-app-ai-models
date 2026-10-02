@@ -168,6 +168,9 @@ def _generation_overrides(ai_model, ai_agent):
     agent's overrides reach a client only here. `max_tokens` is the neutral key, and the Ollama builder
     renames it to `num_predict`.
 
+    An agent's own values beat the model's. For a fallback model the agent's own values still beat the
+    fallback's, so a fallback does not inherit the primary model's values.
+
     Args:
         ai_model: The model under build.
         ai_agent: The agent under build, or None.
@@ -175,13 +178,18 @@ def _generation_overrides(ai_model, ai_agent):
     Returns:
         dict: The parameters to apply on top of the model's own.
     """
-    source = ai_agent if ai_agent is not None else ai_model
     overrides = {}
 
-    if source.resolved_temperature is not None:
-        overrides["temperature"] = float(source.resolved_temperature)
-    if source.resolved_num_predict is not None:
-        overrides["max_tokens"] = int(source.resolved_num_predict)
+    if ai_agent is not None and ai_agent.temperature is not None:
+        overrides["temperature"] = float(ai_agent.temperature)
+    elif ai_model.resolved_temperature is not None:
+        overrides["temperature"] = float(ai_model.resolved_temperature)
+
+    if ai_agent is not None and ai_agent.num_predict is not None:
+        overrides["max_tokens"] = int(ai_agent.num_predict)
+    elif ai_model.resolved_num_predict is not None:
+        overrides["max_tokens"] = int(ai_model.resolved_num_predict)
+
     return overrides
 
 
@@ -316,6 +324,23 @@ def named_bindings(ai_agent):
         dict: Wire name to AIAgentTool row.
     """
     return wire_names(tool_bindings(ai_agent))
+
+
+def fallback_models(ai_agent):
+    """Return every available fallback model on this agent, in weight order.
+
+    A fallback that cannot answer (a disabled model or provider) is left out, the same way
+    `tool_bindings` leaves out a disabled tool. A model that cannot answer would fail the same way
+    the primary did.
+
+    Args:
+        ai_agent: The agent to read.
+
+    Returns:
+        list: Available AIAgentFallback rows, in `weight, pk` order.
+    """
+    bindings = ai_agent.fallback_bindings.select_related("model__provider").order_by("weight", "pk")
+    return [binding for binding in bindings if binding.is_available]
 
 
 def mcp_bindings(ai_agent):
@@ -553,11 +578,20 @@ def build_agent(ai_agent, *, extra_tools=(), checkpointer=None, user=None):
 
     _check_names_are_unique(ai_agent, tools)
 
+    primary = chat_model_for(ai_agent.model, ai_agent=ai_agent)
+    fallbacks = [chat_model_for(binding.model, ai_agent=ai_agent) for binding in fallback_models(ai_agent)]
+    middleware = ()
+    if fallbacks:
+        from langchain.agents.middleware import ModelFallbackMiddleware  # pylint: disable=import-outside-toplevel
+
+        middleware = [ModelFallbackMiddleware(*fallbacks)]
+
     return create_agent(
-        model=chat_model_for(ai_agent.model, ai_agent=ai_agent),
+        model=primary,
         tools=tools,
         system_prompt=ai_agent.system_prompt,
         checkpointer=checkpointer,
+        middleware=middleware,
     )
 
 
