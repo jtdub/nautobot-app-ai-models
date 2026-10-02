@@ -52,6 +52,7 @@ router.register("ai-tool-approvals", views.AIToolApprovalUIViewSet)
 router.register("ai-agent-subagents", views.AIAgentSubagentUIViewSet)
 router.register("ai-skills", views.AISkillUIViewSet)
 router.register("ai-agent-skills", views.AIAgentSkillUIViewSet)
+router.register("ai-agent-fallbacks", views.AIAgentFallbackUIViewSet)
 router.register("ai-agent-threads", views.AIAgentThreadUIViewSet)
 router.register("ai-usage-records", views.AIUsageRecordUIViewSet)
 

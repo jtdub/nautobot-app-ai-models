@@ -16,6 +16,7 @@ from nautobot_ai_models.choices import (
 )
 from nautobot_ai_models.models import (
     AIAgent,
+    AIAgentFallback,
     AIAgentSkill,
     AIAgentSubagent,
     AIAgentThread,
@@ -502,6 +503,24 @@ def create_aiagentskill(**kwargs):
         AIAgentSkill.objects.create(agent=agents[2], skill=skills[0], **kwargs),
         AIAgentSkill.objects.create(agent=agents[2], skill=skills[1], weight=200, **kwargs),
         AIAgentSkill.objects.create(agent=agents[0], skill=skills[0], weight=300, **kwargs),
+    ]
+
+
+def create_aiagentfallback(**kwargs):
+    """Return the suite's fallback bindings, creating them if they do not exist.
+
+    Returns:
+        list: Three AIAgentFallback records, each on an agent whose primary is the other model.
+    """
+    if AIAgentFallback.objects.exists():
+        return list(AIAgentFallback.objects.all())
+
+    agents = create_aiagent()
+    chat_models = list(AIModel.objects.filter(kind=AIModelKindChoices.CHAT))
+    return [
+        AIAgentFallback.objects.create(agent=agents[0], model=chat_models[1], **kwargs),
+        AIAgentFallback.objects.create(agent=agents[2], model=chat_models[0], weight=200, **kwargs),
+        AIAgentFallback.objects.create(agent=agents[1], model=chat_models[1], weight=300, **kwargs),
     ]
 
 

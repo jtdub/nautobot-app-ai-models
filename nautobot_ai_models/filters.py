@@ -21,6 +21,7 @@ from nautobot.tenancy.models import Tenant
 
 from nautobot_ai_models import models
 from nautobot_ai_models.constants import (
+    AI_AGENT_FALLBACK_FIELDS,
     AI_AGENT_SKILL_FIELDS,
     AI_AGENT_SUBAGENT_FIELDS,
     AI_AGENT_TOOL_FIELDS,
@@ -407,6 +408,28 @@ class AIAgentSkillFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ance
 
         model = models.AIAgentSkill
         fields = list(AI_AGENT_SKILL_FIELDS)  # pylint: disable=nb-use-fields-all
+
+
+class AIAgentFallbackFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ancestors
+    """Filter for AIAgentFallback."""
+
+    q = SearchFilter(filter_predicates={"agent__name": "icontains", "model__name": "icontains"})
+    agent = NaturalKeyOrPKMultipleChoiceFilter(
+        queryset=models.AIAgent.objects.all(),
+        to_field_name="name",
+        label="AI Agent (name or ID)",
+    )
+    model = NaturalKeyOrPKMultipleChoiceFilter(
+        queryset=models.AIModel.objects.all(),
+        to_field_name="name",
+        label="AI Model (name or ID)",
+    )
+
+    class Meta:
+        """Meta attributes for filter."""
+
+        model = models.AIAgentFallback
+        fields = list(AI_AGENT_FALLBACK_FIELDS)  # pylint: disable=nb-use-fields-all
 
 
 class AIUsageRecordFilterSet(BaseFilterSet):  # pylint: disable=too-many-ancestors

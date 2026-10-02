@@ -339,6 +339,25 @@ class AIAgentSkillViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
         cls.update_data = {"agent": agent.pk, "skill": skills[1].pk, "weight": 150}
 
 
+class AIAgentFallbackViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
+    # pylint: disable=too-many-ancestors
+    """Test the AIAgentFallback views."""
+
+    model = models.AIAgentFallback
+    bulk_edit_data = {"weight": 200}
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data and the form payloads the generic view tests post."""
+        fixtures.create_aiagentfallback()
+        agent = spare_agent("View Test Fallback Agent")
+        spare = (
+            models.AIModel.objects.exclude(pk=agent.model_id).filter(kind=AIModelKindChoices.CHAT).first()
+        )
+        cls.form_data = {"agent": agent.pk, "model": spare.pk, "weight": 100}
+        cls.update_data = {"agent": agent.pk, "model": spare.pk, "weight": 150}
+
+
 class AIToolApprovalViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
     # pylint: disable=too-many-ancestors
     """Test the AIToolApproval views."""

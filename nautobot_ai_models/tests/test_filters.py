@@ -505,6 +505,27 @@ class AIAgentSkillFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: dis
         )
 
 
+class AIAgentFallbackFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=too-many-ancestors
+    """AIAgentFallback Filter Test Case."""
+
+    queryset = models.AIAgentFallback.objects.all()
+    filterset = filters.AIAgentFallbackFilterSet
+    generic_filter_tests = (("id",), ("created",), ("last_updated",), ("weight",))
+
+    @classmethod
+    def setUpTestData(cls):
+        """Set up test data for the AIAgentFallback model."""
+        fixtures.create_aiagentfallback()
+
+    def test_filtering_by_agent(self):
+        """Which fallback models this agent may move to."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        self.assertEqual(
+            self.filterset({"agent": [agent.name]}, self.queryset).qs.count(),
+            self.queryset.filter(agent=agent).count(),
+        )
+
+
 class AIAgentThreadFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=too-many-ancestors
     """AIAgentThread Filter Test Case."""
 

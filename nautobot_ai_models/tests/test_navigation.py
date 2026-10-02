@@ -100,7 +100,7 @@ class AIToolsNavigationTest(TestCase):
             "aiusagerecord_list",
         ):
             self.assertIn(reverse(f"plugins:nautobot_ai_models:{view}"), links)
-        for view in ("aiagenttool_list", "aiagentsubagent_list", "aiagentskill_list"):
+        for view in ("aiagenttool_list", "aiagentsubagent_list", "aiagentskill_list", "aiagentfallback_list"):
             self.assertNotIn(reverse(f"plugins:nautobot_ai_models:{view}"), links)
 
     def test_ai_models_group_holds_both_models(self):

@@ -6,6 +6,7 @@ from nautobot.apps.tables import BaseTable, BooleanColumn, ButtonsColumn, Linked
 from nautobot_ai_models import models
 from nautobot_ai_models.constants import (
     AI_AGENT_FIELDS,
+    AI_AGENT_FALLBACK_FIELDS,
     AI_AGENT_IDENTITY_FIELDS,
     AI_AGENT_SKILL_FIELDS,
     AI_AGENT_SUBAGENT_FIELDS,
@@ -359,6 +360,23 @@ class AIAgentSkillTable(BaseTable):
         model = models.AIAgentSkill
         fields = ("pk", *AI_AGENT_SKILL_FIELDS, "actions")
         default_columns = ("pk", "agent", "skill", "weight", "actions")
+
+
+class AIAgentFallbackTable(BaseTable):
+    # pylint: disable=R0903
+    """Table for the AI Agent Fallback list view, and for the panel on an agent's page."""
+
+    pk = ToggleColumn()
+    agent = tables.Column(linkify=True, verbose_name="AI Agent")
+    model = tables.Column(linkify=True, verbose_name="AI Model")
+    actions = ButtonsColumn(models.AIAgentFallback, pk_field="pk")
+
+    class Meta(BaseTable.Meta):
+        """Meta attributes."""
+
+        model = models.AIAgentFallback
+        fields = ("pk", *AI_AGENT_FALLBACK_FIELDS, "actions")
+        default_columns = ("pk", "agent", "model", "weight", "actions")
 
 
 class AIUsageRecordTable(BaseTable):

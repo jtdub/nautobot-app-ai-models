@@ -14,6 +14,7 @@ from nautobot_ai_models.choices import (
 )
 from nautobot_ai_models.models import (
     AIAgent,
+    AIAgentFallback,
     AIAgentSkill,
     AIAgentSubagent,
     AIAgentThread,
@@ -552,6 +553,16 @@ class Command(BaseCommand):
                 agent=change, skill=skill, defaults={"weight": weight * 100}
             )
 
+        inventory_fallback = (
+            AIModel.objects.using(db).filter(provider__name="Ollama Lab", kind="chat").first()
+        )
+        if inventory_fallback is not None and inventory_fallback != inventory.model:
+            AIAgentFallback.objects.using(db).update_or_create(
+                agent=inventory,
+                model=inventory_fallback,
+                defaults={"weight": 100},
+            )
+
         read_only = MCPTool.objects.using(db).filter(writable=False).first()
         if read_only is None:
             return
@@ -623,6 +634,7 @@ class Command(BaseCommand):
         AIAgentTool.objects.using(db).filter(agent__name__in=agent_names).delete()
         AIAgentSubagent.objects.using(db).filter(parent__name__in=agent_names).delete()
         AIAgentSkill.objects.using(db).filter(agent__name__in=agent_names).delete()
+        AIAgentFallback.objects.using(db).filter(agent__name__in=agent_names).delete()
         AIUsageRecord.objects.using(db).filter(agent__name__in=agent_names).delete()
         AIAgentThread.objects.using(db).filter(agent__name__in=agent_names).delete()
         AIAgent.objects.using(db).filter(name__in=agent_names).delete()

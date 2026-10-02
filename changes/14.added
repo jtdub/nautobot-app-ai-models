@@ -1,0 +1,1 @@
+Added AI Agent Fallback: an ordered list of backup chat models an agent moves to when its primary model fails. The built agent tries the next model on its own, and the usage record names the model that answered.
