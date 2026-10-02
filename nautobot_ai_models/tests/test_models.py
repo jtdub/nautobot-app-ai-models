@@ -794,9 +794,7 @@ class TestAIAgent(ModelTestCases.BaseModelTestCase):
     def test_a_fallback_that_cannot_call_a_tool_is_refused_for_an_agent_with_tools(self):
         """The same tool-capability rule as the primary, applied to a fallback."""
         agent = fixtures.create_aiagenttool()[0].agent
-        fallback_model = (
-            models.AIModel.objects.exclude(pk=agent.model_id).filter(kind=AIModelKindChoices.CHAT).first()
-        )
+        fallback_model = models.AIModel.objects.exclude(pk=agent.model_id).filter(kind=AIModelKindChoices.CHAT).first()
         fallback_model.supports_tools = False
         fallback_model.validated_save()
         models.AIAgentFallback.objects.create(agent=agent, model=fallback_model)
@@ -1166,9 +1164,7 @@ class TestAIAgentFallback(ModelTestCases.BaseModelTestCase):
         super().setUpTestData()
         fixtures.create_aiagenttool()
         agent = models.AIAgent.objects.get(name="Test Supervisor")
-        fallback = (
-            models.AIModel.objects.exclude(pk=agent.model_id).filter(kind=AIModelKindChoices.CHAT).first()
-        )
+        fallback = models.AIModel.objects.exclude(pk=agent.model_id).filter(kind=AIModelKindChoices.CHAT).first()
         models.AIAgentFallback.objects.create(agent=agent, model=fallback)
 
     def test_a_fallback_is_bound_to_an_agent_once(self):
@@ -1200,9 +1196,7 @@ class TestAIAgentFallback(ModelTestCases.BaseModelTestCase):
     def test_a_tool_incapable_fallback_is_refused_for_an_agent_with_tools(self):
         """The fallback would break the same build the primary would."""
         agent = fixtures.create_aiagenttool()[0].agent
-        fallback_model = (
-            models.AIModel.objects.exclude(pk=agent.model_id).filter(kind=AIModelKindChoices.CHAT).first()
-        )
+        fallback_model = models.AIModel.objects.exclude(pk=agent.model_id).filter(kind=AIModelKindChoices.CHAT).first()
         fallback_model.supports_tools = False
         fallback_model.validated_save()
         with self.assertRaises(ValidationError) as raised:

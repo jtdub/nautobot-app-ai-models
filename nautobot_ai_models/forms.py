@@ -33,8 +33,8 @@ from nautobot_ai_models.choices import (
     SubagentInputModeChoices,
 )
 from nautobot_ai_models.constants import (
-    AI_AGENT_FIELDS,
     AI_AGENT_FALLBACK_FIELDS,
+    AI_AGENT_FIELDS,
     AI_AGENT_SKILL_FIELDS,
     AI_AGENT_SUBAGENT_FIELDS,
     AI_AGENT_TOOL_FIELDS,
@@ -793,9 +793,7 @@ class AIAgentFallbackForm(NautobotModelForm):  # pylint: disable=too-many-ancest
 class AIAgentFallbackBulkEditForm(NautobotBulkEditForm):  # pylint: disable=too-many-ancestors
     """Bulk editing fallback bindings."""
 
-    pk = forms.ModelMultipleChoiceField(
-        queryset=models.AIAgentFallback.objects.all(), widget=forms.MultipleHiddenInput
-    )
+    pk = forms.ModelMultipleChoiceField(queryset=models.AIAgentFallback.objects.all(), widget=forms.MultipleHiddenInput)
     weight = forms.IntegerField(required=False, min_value=0)
 
     class Meta:
@@ -805,14 +803,27 @@ class AIAgentFallbackBulkEditForm(NautobotBulkEditForm):  # pylint: disable=too-
 
 
 class AIAgentFallbackFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancestors
-    """Filtering fallback bindings."""
+    """Filtering fallback bindings.
+
+    `AIAgentFallback.model` collides with the `model` attribute that a filter form uses to name its
+    content type, so `__init__` adds the field for that foreign key instead.
+    """
 
     model = models.AIAgentFallback
     field_order = ["q", "agent", "model"]
 
     q = forms.CharField(required=False, label="Search", help_text="Search within the agent's or the model's name.")
     agent = DynamicModelMultipleChoiceField(queryset=models.AIAgent.objects.all(), required=False, label="AI Agent")
-    model = DynamicModelMultipleChoiceField(queryset=models.AIModel.objects.all(), required=False, label="AI Model")
+
+    def __init__(self, *args, **kwargs):
+        """Add the AI Model field, which cannot be declared on the class."""
+        super().__init__(*args, **kwargs)
+        self.fields["model"] = DynamicModelMultipleChoiceField(
+            queryset=models.AIModel.objects.all(),
+            required=False,
+            label="AI Model",
+        )
+        self.order_fields(self.field_order)
 
 
 class AIUsageRecordFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancestors

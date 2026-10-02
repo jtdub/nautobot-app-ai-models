@@ -5,8 +5,8 @@ from nautobot.apps.tables import BaseTable, BooleanColumn, ButtonsColumn, Linked
 
 from nautobot_ai_models import models
 from nautobot_ai_models.constants import (
-    AI_AGENT_FIELDS,
     AI_AGENT_FALLBACK_FIELDS,
+    AI_AGENT_FIELDS,
     AI_AGENT_IDENTITY_FIELDS,
     AI_AGENT_SKILL_FIELDS,
     AI_AGENT_SUBAGENT_FIELDS,

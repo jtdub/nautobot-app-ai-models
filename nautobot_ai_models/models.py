@@ -1257,12 +1257,7 @@ class AIAgent(PrimaryModel):  # pylint: disable=too-many-ancestors
 
         if self.fallback_bindings.filter(model_id=self.model_id).exists():
             raise ValidationError(
-                {
-                    "model": (
-                        "The agent's primary model cannot also be a fallback. Remove it from "
-                        "Fallback models."
-                    )
-                }
+                {"model": ("The agent's primary model cannot also be a fallback. Remove it from " "Fallback models.")}
             )
 
         bad_fallback = self.fallback_bindings.filter(model__supports_tools=False).first()

@@ -433,9 +433,7 @@ class AIAgentFallbackAPIViewTest(APIViewTestCases.APIViewTestCase):
         super().setUpTestData()
         fixtures.create_aiagentfallback()
         agent = spare_agent("API Test Fallback Agent")
-        spare = (
-            models.AIModel.objects.exclude(pk=agent.model_id).filter(kind=AIModelKindChoices.CHAT).first()
-        )
+        spare = models.AIModel.objects.exclude(pk=agent.model_id).filter(kind=AIModelKindChoices.CHAT).first()
         cls.create_data = [{"agent": agent.pk, "model": spare.pk, "weight": 100}]
         cls.update_data = {"weight": 175}
 

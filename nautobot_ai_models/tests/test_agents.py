@@ -301,7 +301,6 @@ class FallbackModelsTest(TestCase):
     def test_build_agent_passes_the_fallback_middleware(self):
         """The primary stays as `model=`, and the fallbacks ride in the middleware."""
         agent = AIAgent.objects.get(name="Test Supervisor")
-        fallback = AIAgentFallback.objects.first().model
         captured = {}
         primary_client = mock.Mock()
         fallback_client = mock.Mock()
@@ -394,8 +393,6 @@ class ChatModelTest(TestCase):
 
     def test_an_addressed_provider_needs_a_url(self):
         """Ollama is an address, not a service. Without one a client falls back elsewhere."""
-        from nautobot_ai_models.models import AIModel  # pylint: disable=import-outside-toplevel
-
         model = AIModel.objects.filter(provider__provider_type=AIProviderTypeChoices.OLLAMA).first()
         integration = model.provider.external_integration
         integration.remote_url = ""

@@ -553,9 +553,7 @@ class Command(BaseCommand):
                 agent=change, skill=skill, defaults={"weight": weight * 100}
             )
 
-        inventory_fallback = (
-            AIModel.objects.using(db).filter(provider__name="Ollama Lab", kind="chat").first()
-        )
+        inventory_fallback = AIModel.objects.using(db).filter(provider__name="Ollama Lab", kind="chat").first()
         if inventory_fallback is not None and inventory_fallback != inventory.model:
             AIAgentFallback.objects.using(db).update_or_create(
                 agent=inventory,
