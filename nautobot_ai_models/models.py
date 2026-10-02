@@ -2131,16 +2131,17 @@ class AIAgentFallback(OrganizationalModel):  # pylint: disable=too-many-ancestor
             and self.agent.present_in_database
             and self.model_id is not None
             and self.model.supports_tools is False
-            and (self.agent.tool_bindings.exists() or self.agent.subagent_bindings.exists())
         ):
-            raise ValidationError(
-                {
-                    "model": (
-                        f"'{self.model}' is recorded as unable to call a tool, and this agent has "
-                        "tools or subagents bound to it."
-                    )
-                }
-            )
+            binds_tools = self.agent.tool_bindings.exists() or self.agent.subagent_bindings.exists()
+            if binds_tools:
+                raise ValidationError(
+                    {
+                        "model": (
+                            f"'{self.model}' is recorded as unable to call a tool, and this agent has "
+                            "tools or subagents bound to it."
+                        )
+                    }
+                )
 
     @property
     def is_available(self):
