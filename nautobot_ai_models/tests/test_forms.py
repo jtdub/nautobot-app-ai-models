@@ -392,6 +392,43 @@ class AIAgentToolFormTest(FormTestCases.BaseFormTestCase):
         )
         self.assertFalse(form.is_valid())
 
+    def test_binding_a_prompt_or_a_resource_saves(self):
+        """A prompt or a resource is a target the form can bind."""
+        prompt = fixtures.create_mcpprompt()[0]
+        resource = fixtures.create_mcpresource()[0]
+
+        form = forms.AIAgentToolForm(data={"agent": self.agent.pk, "mcp_prompt": prompt.pk, "weight": 100})
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertTrue(form.save())
+
+        form = forms.AIAgentToolForm(data={"agent": self.agent.pk, "mcp_resource": resource.pk, "weight": 100})
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertTrue(form.save())
+
+    def test_binding_a_prompt_and_a_tool_is_refused(self):
+        """A prompt and a tool together are still two things under one name."""
+        prompt = fixtures.create_mcpprompt()[0]
+        form = forms.AIAgentToolForm(
+            data={
+                "agent": self.agent.pk,
+                "ai_tool": self.ai_tool.pk,
+                "mcp_prompt": prompt.pk,
+                "weight": 100,
+            }
+        )
+        self.assertFalse(form.is_valid())
+
+    def test_the_ai_tool_field_offers_no_create_button(self):
+        """An AI Tool has no add page, so its field must not offer to create one.
+
+        The embedded-create button on a dynamic field opens the add page of the related model. An
+        AI Tool is written by the Sync AI Tools Job, so that page does not exist and the button
+        would fail the whole form page.
+        """
+        form = forms.AIAgentToolForm()
+        self.assertIs(form.fields["ai_tool"].embedded_create, False)
+        self.assertTrue(form.fields["mcp_prompt"].embedded_create)
+
 
 class AIAgentSubagentFormTest(FormTestCases.BaseFormTestCase):
     """Test the AIAgentSubagent forms."""

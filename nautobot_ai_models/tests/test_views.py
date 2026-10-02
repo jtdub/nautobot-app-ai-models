@@ -15,26 +15,7 @@ from nautobot_ai_models.choices import (
     SubagentInputModeChoices,
 )
 from nautobot_ai_models.tests import fixtures
-
-
-def spare_agent(name):
-    """Create an agent with no bindings, for a form payload that must not collide.
-
-    Every pair the fixtures make is already taken, and each binding model allows one row per pair.
-    A fresh agent leaves every pair free and can take part in no cycle.
-
-    Args:
-        name: The agent's name.
-
-    Returns:
-        AIAgent: The saved agent.
-    """
-    return models.AIAgent.objects.create(
-        name=name,
-        description=f"{name}. Give it a hostname.",
-        system_prompt="You answer from tools only.",
-        model=models.AIModel.objects.filter(kind=AIModelKindChoices.CHAT).first(),
-    )
+from nautobot_ai_models.tests.scaffolding import spare_agent
 
 
 class AIProviderViewTest(ViewTestCases.OrganizationalObjectViewTestCase):

@@ -15,9 +15,9 @@ This module keeps these rules:
 * **G5** - a wire name is unique within one agent. Two sources can offer one name, and a model
   given both cannot say which it meant.
 * **G6** - a Job tool starts a Job as a named user and reports. It never waits.
-* **G7** - this module builds no MCP tool. An MCP call needs an approval gate that belongs to the
-  consuming app. This module returns the binding, and the consuming app pairs it with its own
-  caller and passes the result back as `extra_tools`.
+* **G7** - this module builds no MCP tool, prompt, or resource call. An MCP call needs an approval
+  gate that belongs to the consuming app. This module returns the binding, and the consuming app
+  pairs it with its own caller and passes the result back as `extra_tools`.
 """
 
 import logging
@@ -297,6 +297,8 @@ def tool_bindings(ai_agent):
         "agent",
         "mcp_tool__mcp_server",
         "ai_tool__job",
+        "mcp_prompt__mcp_server",
+        "mcp_resource__mcp_server",
     ).order_by("weight", "pk")
     return [binding for binding in bindings if binding.target.is_available]
 
@@ -317,12 +319,13 @@ def named_bindings(ai_agent):
 
 
 def mcp_bindings(ai_agent):
-    """Return the bindings a consuming app has to build itself (G7).
+    """Return the MCP bindings a consuming app has to build itself (G7).
 
-    This module cannot build an MCP tool, because an MCP call needs a gate that this app does not own.
-    It settles everything the model is told: the wire name, the description, and the schema. The
-    consuming app pairs each binding with its own caller and passes the results to `build_agent` as
-    `extra_tools`.
+    This module cannot build an MCP call, because an MCP call needs a gate that this app does not
+    own. It settles everything the model is told: the wire name, the description, and the schema.
+    The consuming app pairs each binding with its own caller and passes the results to
+    `build_agent` as `extra_tools`. A prompt or a resource is another MCP kind, and the app reads
+    `binding.mcp_kind` to pick its call.
 
     Args:
         ai_agent: The agent to read.
@@ -336,9 +339,9 @@ def mcp_bindings(ai_agent):
     """
     named = {}
     for name, binding in named_bindings(ai_agent).items():
-        if binding.mcp_tool_id is None:
+        if binding.mcp_kind is None:
             continue
-        server = binding.mcp_tool.mcp_server
+        server = binding.target.mcp_server
         if server.transport not in CALLABLE_TRANSPORTS:
             raise AgentBuildError(
                 f"MCP server '{server}' is registered on the '{server.transport}' transport, which "
@@ -351,8 +354,8 @@ def mcp_bindings(ai_agent):
 def resolve_tools(ai_agent, *, user=None):
     """Turn this agent's non-MCP bindings into LangChain tools (G4, G5, G6, G7).
 
-    This function returns no MCP tool. Read those from `mcp_bindings()`, pair each one with your own
-    gated caller, then pass the results to `build_agent` as `extra_tools`.
+    This function returns no MCP binding. Read those from `mcp_bindings()`, pair each one with your
+    own gated caller, then pass the results to `build_agent` as `extra_tools`.
 
     Args:
         ai_agent: The agent to build tools for.
@@ -370,7 +373,7 @@ def resolve_tools(ai_agent, *, user=None):
 
     resolved = []
     for name, binding in named_bindings(ai_agent).items():
-        if binding.mcp_tool_id is not None:
+        if binding.ai_tool_id is None:
             continue
         if binding.ai_tool.job_id is not None:
             resolved.append(_job_tool(binding, name, tool, user))

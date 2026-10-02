@@ -7,6 +7,7 @@ The agent half of this module describes an agent. It does not run one. `services
 these rows into a LangChain agent, and even that module only builds the agent.
 """
 
+import re
 import uuid
 from decimal import Decimal
 
@@ -796,14 +797,41 @@ class MCPResource(OrganizationalModel):  # pylint: disable=too-many-ancestors
         """
         return self.enabled and self.mcp_server.enabled
 
+    @property
+    def argument_schema(self):
+        """The JSON Schema a caller fills the template variables with.
+
+        A template URI holds RFC 6570 variables, and each becomes one string property. A plain URI
+        has no variables, so there is nothing a caller fills.
+
+        Returns:
+            dict: A JSON Schema object, or an empty one for a plain resource.
+        """
+        variables = re.findall(r"{([^{}]+)}", self.uri)
+        if not variables:
+            return {}
+        return {
+            "type": "object",
+            "properties": {name: {"type": "string"} for name in variables},
+        }
+
+    @property
+    def writable(self):
+        """A resource is read by protocol, so a call to it changes nothing.
+
+        Returns:
+            bool: Always False.
+        """
+        return False
+
 
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
 class MCPPrompt(OrganizationalModel):  # pylint: disable=too-many-ancestors
     """One prompt template an MCP server advertises.
 
-    A prompt is chosen by a person, not by a model, so there is no binding to an agent here. When
-    an agent has to choose one for itself, that is a tool, and it belongs on
-    :class:`AIAgentTool` as a third target rather than in a second binding table.
+    A prompt is chosen by a person, not by a model, so there is no binding table here. When an
+    agent has to choose one for itself, that is a target on :class:`AIAgentTool` beside the MCP
+    tool and the AI tool.
     """
 
     is_dynamic_group_associable_model = False
@@ -899,6 +927,40 @@ class MCPPrompt(OrganizationalModel):  # pylint: disable=too-many-ancestors
             bool: True when the prompt and its server are both enabled.
         """
         return self.enabled and self.mcp_server.enabled
+
+    @property
+    def argument_schema(self):
+        """The JSON Schema a caller builds its arguments from.
+
+        The column holds a list because the protocol sends a list. A model reads a schema, so this
+        property builds one from the list.
+
+        Returns:
+            dict: A JSON Schema object, with `required` from `required_arguments`.
+        """
+        properties = {}
+        if isinstance(self.arguments, list):
+            for argument in self.arguments:
+                if not isinstance(argument, dict) or not argument.get("name"):
+                    continue
+                property_schema = {"type": "string"}
+                if argument.get("description"):
+                    property_schema["description"] = argument["description"]
+                properties[argument["name"]] = property_schema
+        schema = {"type": "object", "properties": properties}
+        required = self.required_arguments
+        if required:
+            schema["required"] = list(required)
+        return schema
+
+    @property
+    def writable(self):
+        """A prompt is chosen by a person, so a call to it changes nothing.
+
+        Returns:
+            bool: Always False.
+        """
+        return False
 
 
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
@@ -1249,7 +1311,13 @@ class AIAgentToolQuerySet(RestrictedQuerySet):
         Returns:
             AIAgentToolQuerySet: The bindings, with those reads prefetched.
         """
-        return self.select_related("agent", "mcp_tool__mcp_server", "ai_tool").prefetch_related("approvals")
+        return self.select_related(
+            "agent",
+            "mcp_tool__mcp_server",
+            "ai_tool",
+            "mcp_prompt__mcp_server",
+            "mcp_resource__mcp_server",
+        ).prefetch_related("approvals")
 
 
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
@@ -1290,6 +1358,22 @@ class AIAgentTool(OrganizationalModel):  # pylint: disable=too-many-ancestors
         blank=True,
         verbose_name="AI Tool",
     )
+    mcp_prompt = models.ForeignKey(
+        to="nautobot_ai_models.MCPPrompt",
+        on_delete=models.PROTECT,
+        related_name="agent_bindings",
+        null=True,
+        blank=True,
+        verbose_name="MCP Prompt",
+    )
+    mcp_resource = models.ForeignKey(
+        to="nautobot_ai_models.MCPResource",
+        on_delete=models.PROTECT,
+        related_name="agent_bindings",
+        null=True,
+        blank=True,
+        verbose_name="MCP Resource",
+    )
     name_override = models.CharField(
         max_length=CHARFIELD_MAX_LENGTH,
         blank=True,
@@ -1324,6 +1408,14 @@ class AIAgentTool(OrganizationalModel):  # pylint: disable=too-many-ancestors
                 fields=["agent", "ai_tool"],
                 name="nautobot_ai_models_aiagenttool_unique_agent_ai_tool",
             ),
+            models.UniqueConstraint(
+                fields=["agent", "mcp_prompt"],
+                name="nautobot_ai_models_aiagenttool_unique_agent_mcp_prompt",
+            ),
+            models.UniqueConstraint(
+                fields=["agent", "mcp_resource"],
+                name="nautobot_ai_models_aiagenttool_unique_agent_mcp_resource",
+            ),
         ]
 
     def __str__(self):
@@ -1331,35 +1423,72 @@ class AIAgentTool(OrganizationalModel):  # pylint: disable=too-many-ancestors
         return f"{self.agent.name}: {self.wire_name}"
 
     def clean(self):
-        """Check that the binding names exactly one tool.
+        """Check that the binding names exactly one target.
+
+        A resource with no name needs a name override, or the model could not say which resource it
+        meant.
 
         Raises:
-            ValidationError: The row names neither tool or both of them.
+            ValidationError: The row names no target or more than one, or a nameless resource has no
+                override.
         """
         super().clean()
 
-        named = [field for field in ("mcp_tool", "ai_tool") if getattr(self, f"{field}_id") is not None]
+        named = [
+            field
+            for field in ("mcp_tool", "ai_tool", "mcp_prompt", "mcp_resource")
+            if getattr(self, f"{field}_id") is not None
+        ]
         if not named:
-            raise ValidationError("A tool binding has to name an MCP tool or an AI tool.")
+            raise ValidationError("A tool binding has to name an MCP tool, an AI tool, a prompt, or a resource.")
         if len(named) > 1:
-            raise ValidationError("A tool binding names one tool. This one names both.")
+            raise ValidationError("A tool binding names one target. This one names more than one.")
+
+        if self.mcp_resource_id is not None and not (self.mcp_resource.name or self.name_override):
+            raise ValidationError(
+                {
+                    "name_override": (
+                        "This resource has no name of its own, so the binding needs a name override "
+                        "for the model to call it by."
+                    )
+                }
+            )
 
     @property
     def target(self):
-        """The tool this binding points at, whichever kind it is.
+        """The target this binding points at, whichever kind it is.
 
         Returns:
-            MCPTool | AITool: The bound tool.
+            MCPTool | AITool | MCPPrompt | MCPResource: The bound target.
 
         Raises:
-            ValueError: The row names no tool, which `clean()` refuses and a direct write can still
+            ValueError: The row names no target, which `clean()` refuses and a direct write can still
                 produce.
         """
         if self.mcp_tool_id is not None:
             return self.mcp_tool
         if self.ai_tool_id is not None:
             return self.ai_tool
-        raise ValueError(f"Tool binding {self.pk} names no tool.")
+        if self.mcp_prompt_id is not None:
+            return self.mcp_prompt
+        if self.mcp_resource_id is not None:
+            return self.mcp_resource
+        raise ValueError(f"Tool binding {self.pk} names no target.")
+
+    @property
+    def mcp_kind(self):
+        """Which MCP call the consuming app pairs this binding with.
+
+        Returns:
+            str | None: "tool", "prompt", or "resource" for an MCP target, None for an AI tool.
+        """
+        if self.mcp_tool_id is not None:
+            return "tool"
+        if self.mcp_prompt_id is not None:
+            return "prompt"
+        if self.mcp_resource_id is not None:
+            return "resource"
+        return None
 
     @property
     def wire_name(self):

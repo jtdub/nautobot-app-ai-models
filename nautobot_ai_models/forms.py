@@ -562,12 +562,17 @@ class AIAgentToolForm(NautobotModelForm):  # pylint: disable=too-many-ancestors
     agent = DynamicModelChoiceField(queryset=models.AIAgent.objects.all(), label="AI Agent")
     mcp_tool = DynamicModelChoiceField(queryset=models.MCPTool.objects.all(), required=False, label="MCP Tool")
     ai_tool = DynamicModelChoiceField(queryset=models.AITool.objects.all(), required=False, label="AI Tool")
+    mcp_prompt = DynamicModelChoiceField(queryset=models.MCPPrompt.objects.all(), required=False, label="MCP Prompt")
+    mcp_resource = DynamicModelChoiceField(
+        queryset=models.MCPResource.objects.all(), required=False, label="MCP Resource"
+    )
 
     class Meta:
         """Meta attributes."""
 
         model = models.AIAgentTool
         fields = list(AI_AGENT_TOOL_FIELDS)  # pylint: disable=nb-use-fields-all
+        exclude_embedded_create = ["ai_tool"]
 
 
 class AIAgentToolBulkEditForm(NautobotBulkEditForm):  # pylint: disable=too-many-ancestors
@@ -586,12 +591,18 @@ class AIAgentToolFilterForm(NautobotFilterForm):  # pylint: disable=too-many-anc
     """Filtering tool bindings."""
 
     model = models.AIAgentTool
-    field_order = ["q", "agent", "mcp_tool", "ai_tool"]
+    field_order = ["q", "agent", "mcp_tool", "ai_tool", "mcp_prompt", "mcp_resource"]
 
-    q = forms.CharField(required=False, label="Search", help_text="Search within the agent's or the tool's name.")
+    q = forms.CharField(required=False, label="Search", help_text="Search within the agent's or the target's name.")
     agent = DynamicModelMultipleChoiceField(queryset=models.AIAgent.objects.all(), required=False, label="AI Agent")
     mcp_tool = DynamicModelMultipleChoiceField(queryset=models.MCPTool.objects.all(), required=False, label="MCP Tool")
     ai_tool = DynamicModelMultipleChoiceField(queryset=models.AITool.objects.all(), required=False, label="AI Tool")
+    mcp_prompt = DynamicModelMultipleChoiceField(
+        queryset=models.MCPPrompt.objects.all(), required=False, label="MCP Prompt"
+    )
+    mcp_resource = DynamicModelMultipleChoiceField(
+        queryset=models.MCPResource.objects.all(), required=False, label="MCP Resource"
+    )
 
 
 class AIToolApprovalForm(NautobotModelForm):  # pylint: disable=too-many-ancestors

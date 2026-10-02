@@ -158,6 +158,10 @@ class MCPResourceFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ances
         to_field_name="name",
         label="MCP server (name or ID)",
     )
+    has_agents = RelatedMembershipBooleanFilter(
+        field_name="agent_bindings",
+        label="Bound to an agent",
+    )
     last_seen_at = MultiValueDateTimeFilter(label="Last seen")
 
     class Meta:
@@ -186,6 +190,10 @@ class MCPPromptFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ancesto
         queryset=models.MCPServer.objects.all(),
         to_field_name="name",
         label="MCP server (name or ID)",
+    )
+    has_agents = RelatedMembershipBooleanFilter(
+        field_name="agent_bindings",
+        label="Bound to an agent",
     )
     last_seen_at = MultiValueDateTimeFilter(label="Last seen")
 
@@ -265,6 +273,8 @@ class AIAgentToolFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ances
             "name_override": "icontains",
             "mcp_tool__name": "icontains",
             "ai_tool__name": "icontains",
+            "mcp_prompt__name": "icontains",
+            "mcp_resource__name": "icontains",
         }
     )
     agent = NaturalKeyOrPKMultipleChoiceFilter(
@@ -280,6 +290,14 @@ class AIAgentToolFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ances
         queryset=models.AITool.objects.all(),
         to_field_name="name",
         label="AI Tool (name or ID)",
+    )
+    mcp_prompt = NaturalKeyOrPKMultipleChoiceFilter(
+        queryset=models.MCPPrompt.objects.all(),
+        label="MCP Prompt",
+    )
+    mcp_resource = NaturalKeyOrPKMultipleChoiceFilter(
+        queryset=models.MCPResource.objects.all(),
+        label="MCP Resource",
     )
 
     class Meta:
