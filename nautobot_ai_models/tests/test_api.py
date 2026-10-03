@@ -1,5 +1,6 @@
 """Unit tests for the nautobot_ai_models REST API."""
 
+from decimal import Decimal
 from unittest import skip
 
 from django.urls import reverse
@@ -408,6 +409,7 @@ class AIUsageBudgetAPIViewTest(APIViewTestCases.APIViewTestCase):
     """Test the API viewsets for AIUsageBudget."""
 
     model = models.AIUsageBudget
+    choices_fields = ["period"]
     bulk_update_data = {"enabled": False}
 
     @classmethod
@@ -421,7 +423,7 @@ class AIUsageBudgetAPIViewTest(APIViewTestCases.APIViewTestCase):
                 "name": "API Budget One",
                 "agent": agent.pk,
                 "period": AIUsageBudgetPeriodChoices.DAY,
-                "cost_limit": "10.0000",
+                "cost_limit": Decimal("10.0000"),
             },
             {
                 "name": "API Budget Two",
@@ -433,7 +435,7 @@ class AIUsageBudgetAPIViewTest(APIViewTestCases.APIViewTestCase):
                 "name": "API Budget Three",
                 "agent": agent.pk,
                 "period": AIUsageBudgetPeriodChoices.DAY,
-                "cost_limit": "5.0000",
+                "cost_limit": Decimal("5.0000"),
             },
         ]
         cls.update_data = {"enabled": False}

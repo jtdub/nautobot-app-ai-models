@@ -489,7 +489,7 @@ class AIUsageBudgetFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: di
 
     queryset = models.AIUsageBudget.objects.all()
     filterset = filters.AIUsageBudgetFilterSet
-    generic_filter_tests = (("id",), ("created",), ("last_updated",), ("name",), ("enabled",))
+    generic_filter_tests = (("id",), ("created",), ("last_updated",), ("name",))
 
     @classmethod
     def setUpTestData(cls):

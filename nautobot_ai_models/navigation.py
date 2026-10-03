@@ -132,6 +132,12 @@ agent_items = (
         name="Usage",
         permissions=["nautobot_ai_models.view_aiusagerecord"],
     ),
+    NavMenuItem(
+        link="plugins:nautobot_ai_models:aiusagebudget_list",
+        name="Usage Budgets",
+        permissions=["nautobot_ai_models.view_aiusagebudget"],
+        buttons=(NavMenuAddButton(link="plugins:nautobot_ai_models:aiusagebudget_add", permissions=["nautobot_ai_models.add_aiusagebudget"]),),
+    ),
 )
 
 menu_items = (

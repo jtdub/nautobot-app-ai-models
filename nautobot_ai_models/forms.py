@@ -28,6 +28,7 @@ from nautobot_ai_models.choices import (
     AIAgentThreadStatusChoices,
     AIModelKindChoices,
     AIProviderTypeChoices,
+    AIUsageBudgetPeriodChoices,
     AIToolKindChoices,
     MCPTransportChoices,
     SubagentInputModeChoices,
@@ -40,6 +41,7 @@ from nautobot_ai_models.constants import (
     AI_AGENT_TOOL_FIELDS,
     AI_MODEL_CAPABILITY_FIELDS,
     AI_SKILL_FIELDS,
+    AI_USAGE_BUDGET_FIELDS,
     MCP_PROMPT_DEFINITION_FIELDS,
     MCP_RESOURCE_DEFINITION_FIELDS,
     MCP_SERVER_OPERATOR_FIELDS,
@@ -739,6 +741,61 @@ class AISkillFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancesto
     q = forms.CharField(required=False, label="Search", help_text="Search within name or description.")
     name = forms.CharField(required=False, max_length=CHARFIELD_MAX_LENGTH)
     enabled = forms.NullBooleanField(required=False, widget=_boolean_select())
+
+
+class AIUsageBudgetForm(NautobotModelForm):  # pylint: disable=too-many-ancestors
+    """Editing one AI Usage Budget."""
+
+    agent = DynamicModelChoiceField(queryset=models.AIAgent.objects.all(), required=False, label="AI Agent")
+    model = DynamicModelChoiceField(queryset=models.AIModel.objects.all(), required=False, label="AI Model")
+    tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False, label="Tenant")
+
+    class Meta:
+        """Meta attributes."""
+
+        model = models.AIUsageBudget
+        fields = list(AI_USAGE_BUDGET_FIELDS)  # pylint: disable=nb-use-fields-all
+
+
+class AIUsageBudgetBulkEditForm(NautobotBulkEditForm):  # pylint: disable=too-many-ancestors
+    """Bulk editing budgets."""
+
+    pk = forms.ModelMultipleChoiceField(queryset=models.AIUsageBudget.objects.all(), widget=forms.MultipleHiddenInput)
+    description = forms.CharField(required=False, max_length=CHARFIELD_MAX_LENGTH)
+    enabled = forms.NullBooleanField(required=False, widget=_boolean_select())
+
+    class Meta:
+        """Meta attributes."""
+
+        nullable_fields = ["description"]
+
+
+class AIUsageBudgetFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancestors
+    """Filtering budgets.
+
+    `AIUsageBudget.model` collides with the `model` attribute that a filter form uses to name its
+    content type, so `__init__` adds the field for that foreign key instead.
+    """
+
+    model = models.AIUsageBudget
+    field_order = ["q", "name", "agent", "model", "tenant", "period", "enabled"]
+
+    q = forms.CharField(required=False, label="Search", help_text="Search within name or description.")
+    name = forms.CharField(required=False, max_length=CHARFIELD_MAX_LENGTH)
+    agent = DynamicModelMultipleChoiceField(queryset=models.AIAgent.objects.all(), required=False, label="AI Agent")
+    tenant = DynamicModelMultipleChoiceField(queryset=Tenant.objects.all(), required=False, label="Tenant")
+    period = forms.ChoiceField(choices=AIUsageBudgetPeriodChoices, required=False, widget=StaticSelect2())
+    enabled = forms.NullBooleanField(required=False, widget=_boolean_select())
+
+    def __init__(self, *args, **kwargs):
+        """Add the AI Model field, which cannot be declared on the class."""
+        super().__init__(*args, **kwargs)
+        self.fields["model"] = DynamicModelMultipleChoiceField(
+            queryset=models.AIModel.objects.all(),
+            required=False,
+            label="AI Model",
+        )
+        self.order_fields(self.field_order)
 
 
 class AIAgentSkillForm(NautobotModelForm):  # pylint: disable=too-many-ancestors

@@ -1,6 +1,7 @@
 """Unit tests for views."""
 
 import uuid
+from decimal import Decimal
 from unittest import skip
 
 from django.urls import NoReverseMatch, reverse
@@ -339,14 +340,14 @@ class AIUsageBudgetViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
             "name": "view_test_budget",
             "agent": agent.pk,
             "period": AIUsageBudgetPeriodChoices.DAY,
-            "cost_limit": "10.0000",
+            "cost_limit": Decimal("10.0000"),
             "enabled": True,
         }
         cls.update_data = {
             "name": "view_test_budget",
             "agent": agent.pk,
             "period": AIUsageBudgetPeriodChoices.DAY,
-            "cost_limit": "5.0000",
+            "cost_limit": Decimal("5.0000"),
             "enabled": False,
         }
 
