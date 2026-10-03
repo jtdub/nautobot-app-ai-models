@@ -11,7 +11,8 @@ out once, at the price of the day, and stores it.
 # pylint: disable=cyclic-import
 
 import logging
-from datetime import datetime, time as dt_time, timedelta
+from datetime import datetime, timedelta
+from datetime import time as dt_time
 from decimal import Decimal
 
 from django.db.models import Q, Sum
