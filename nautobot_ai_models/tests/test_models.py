@@ -17,6 +17,7 @@ from nautobot_ai_models.choices import (
     AIAgentThreadStatusChoices,
     AIModelKindChoices,
     AIProviderTypeChoices,
+    AIUsageBudgetPeriodChoices,
     AIToolKindChoices,
     SubagentInputModeChoices,
 )
@@ -1281,6 +1282,85 @@ class TestAIUsageRecord(TestCase):
         record = models.AIUsageRecord.objects.first()
         with self.assertRaises(ProtectedError):
             record.model.delete()
+
+
+class TestAIUsageBudget(ModelTestCases.BaseModelTestCase):
+    """Test AIUsageBudget."""
+
+    model = models.AIUsageBudget
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AIUsageBudget model."""
+        super().setUpTestData()
+        fixtures.create_aiusagebudget()
+
+    def test_a_budget_names_one_scope_only(self):
+        """Two scopes is two limits under one name; no scope is a limit on nothing."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        chat = models.AIModel.objects.filter(kind=AIModelKindChoices.CHAT).first()
+        two = models.AIUsageBudget(
+            name="two scopes",
+            agent=agent,
+            model=chat,
+            period=AIUsageBudgetPeriodChoices.DAY,
+            cost_limit=Decimal("10.0000"),
+        )
+        with self.assertRaises(ValidationError):
+            two.full_clean()
+
+        none = models.AIUsageBudget(
+            name="no scope",
+            period=AIUsageBudgetPeriodChoices.DAY,
+            cost_limit=Decimal("10.0000"),
+        )
+        with self.assertRaises(ValidationError):
+            none.full_clean()
+
+    def test_a_budget_needs_a_limit(self):
+        """A budget with no limit is a page that can never be exceeded."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        budget = models.AIUsageBudget(
+            name="no limit",
+            agent=agent,
+            period=AIUsageBudgetPeriodChoices.DAY,
+        )
+        with self.assertRaises(ValidationError):
+            budget.full_clean()
+
+    def test_a_period_longer_than_the_retention_is_refused(self):
+        """A month budget needs 31 days of records, and the default retention is 30."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        budget = models.AIUsageBudget(
+            name="monthly",
+            agent=agent,
+            period=AIUsageBudgetPeriodChoices.MONTH,
+            token_limit=1000,
+        )
+        with self.assertRaises(ValidationError):
+            budget.full_clean()
+
+    def test_the_spend_properties_report_the_period(self):
+        """The detail page shows the spend beside the limit without a service call of its own."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        thread = fixtures.create_aiagentthread()[0]
+        chat = models.AIModel.objects.filter(kind=AIModelKindChoices.CHAT).first()
+        chat.input_cost_per_million = "10.0000"
+        chat.validated_save()
+        usage.record(thread, agent, chat, input_tokens=100_000, output_tokens=0)
+
+        budget = models.AIUsageBudget.objects.create(
+            agent=agent,
+            period=AIUsageBudgetPeriodChoices.DAY,
+            cost_limit=Decimal("2.0000"),
+        )
+        self.assertEqual(budget.spent_cost, Decimal("1.0000"))
+        self.assertEqual(budget.spent_tokens, 100_000)
+        self.assertFalse(budget.is_exceeded)
+
+        budget.cost_limit = Decimal("0.5000")
+        budget.save()
+        self.assertTrue(budget.is_exceeded)
 
 
 class TestAIAgentThread(ModelTestCases.BaseModelTestCase):

@@ -9,8 +9,14 @@ out once, at the price of the day, and stores it.
 """
 
 import logging
+from datetime import datetime, time as dt_time, timedelta
 from decimal import Decimal
 
+from django.db.models import Q, Sum
+from django.db.models.functions import Coalesce
+from django.utils import timezone
+
+from nautobot_ai_models.choices import AIUsageBudgetPeriodChoices
 from nautobot_ai_models.constants import COST_DECIMAL_PLACES, TOKENS_PER_MILLION
 
 logger = logging.getLogger(__name__)
@@ -84,3 +90,107 @@ def delete_for_threads(threads):
     if deleted:
         logger.info("Deleted %s usage record(s).", deleted)
     return deleted
+
+
+def period_start(period, now=None):
+    """The start of the current calendar period in the server time zone.
+
+    A day starts at midnight, a week on Monday, and a month on the first.
+
+    Args:
+        period: An `AIUsageBudgetPeriodChoices` value.
+        now: The moment to anchor the period on, or now.
+
+    Returns:
+        datetime: An aware datetime at the start of the period.
+
+    Raises:
+        ValueError: The period is not one of the three.
+    """
+    now = now or timezone.now()
+    local = timezone.localtime(now)
+    if period == AIUsageBudgetPeriodChoices.DAY:
+        start = datetime(local.year, local.month, local.day)
+    elif period == AIUsageBudgetPeriodChoices.WEEK:
+        monday = local.date() - timedelta(days=local.weekday())
+        start = datetime.combine(monday, dt_time.min)
+    elif period == AIUsageBudgetPeriodChoices.MONTH:
+        start = datetime(local.year, local.month, 1)
+    else:
+        raise ValueError(f"Unknown budget period: {period!r}")
+    return timezone.make_aware(start)
+
+
+def spend(budget, *, now=None):
+    """What a budget's scope spent since the start of its period.
+
+    A missing cost counts as zero, because "nothing was recorded" must not read as "free".
+
+    Args:
+        budget: The AIUsageBudget to measure.
+        now: The moment to anchor the period on, or now.
+
+    Returns:
+        tuple: ``(spent_cost, spent_tokens)``, the summed cost as a Decimal and the summed
+            tokens as an int.
+    """
+    from nautobot_ai_models.models import AIUsageRecord  # pylint: disable=import-outside-toplevel
+
+    records = AIUsageRecord.objects.filter(recorded_at__gte=period_start(budget.period, now))
+    if budget.agent_id is not None:
+        records = records.filter(agent=budget.agent)
+    elif budget.model_id is not None:
+        records = records.filter(model=budget.model)
+    elif budget.tenant_id is not None:
+        records = records.filter(agent__tenant=budget.tenant)
+
+    totals = records.aggregate(
+        cost=Coalesce(Sum("input_cost"), Decimal("0")) + Coalesce(Sum("output_cost"), Decimal("0")),
+        tokens=Coalesce(Sum("input_tokens"), 0) + Coalesce(Sum("output_tokens"), 0),
+    )
+    return totals["cost"], totals["tokens"]
+
+
+def budgets_for(ai_agent, ai_model):
+    """The enabled budgets a call could hit.
+
+    A call sits inside an agent, a model, and possibly a tenant, so any of the three scopes can
+    apply.
+
+    Args:
+        ai_agent: The agent about to call.
+        ai_model: The model about to be called.
+
+    Returns:
+        QuerySet: The enabled AIUsageBudget rows whose scope matches.
+    """
+    from nautobot_ai_models.models import AIUsageBudget  # pylint: disable=import-outside-toplevel
+
+    scope = Q(agent=ai_agent) | Q(model=ai_model)
+    if ai_agent.tenant_id is not None:
+        scope |= Q(tenant=ai_agent.tenant)
+    return AIUsageBudget.objects.filter(enabled=True).filter(scope)
+
+
+def exceeded_budgets(ai_agent, ai_model, *, now=None):
+    """The budgets a call would break.
+
+    The consuming app calls this before a model call and refuses the call when the list is not
+    empty.
+
+    Args:
+        ai_agent: The agent about to call.
+        ai_model: The model about to be called.
+        now: The moment to anchor the periods on, or now.
+
+    Returns:
+        list: The enabled budgets whose spend is at or over a limit.
+    """
+    exceeded = []
+    for budget in budgets_for(ai_agent, ai_model):
+        spent_cost, spent_tokens = spend(budget, now=now)
+        if (budget.cost_limit is not None and spent_cost >= budget.cost_limit) or (
+            budget.token_limit is not None and spent_tokens >= budget.token_limit
+        ):
+            exceeded.append(budget)
+    return exceeded

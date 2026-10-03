@@ -13,6 +13,7 @@ from nautobot_ai_models.choices import (
     AIAgentThreadStatusChoices,
     AIModelKindChoices,
     AIProviderTypeChoices,
+    AIUsageBudgetPeriodChoices,
     AIToolKindChoices,
     MCPTransportChoices,
     SubagentInputModeChoices,
@@ -400,6 +401,42 @@ class AISkillAPIViewTest(RegistryAPIPayloadsMixin, APIViewTestCases.APIViewTestC
             {"body": "Call the tool. Report what it said."},
             [{}, {"enabled": False}, {"body": "A different rule."}],
         )
+
+
+class AIUsageBudgetAPIViewTest(APIViewTestCases.APIViewTestCase):
+    # pylint: disable=too-many-ancestors
+    """Test the API viewsets for AIUsageBudget."""
+
+    model = models.AIUsageBudget
+    bulk_update_data = {"enabled": False}
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data for the AIUsageBudget API viewset."""
+        super().setUpTestData()
+        fixtures.create_aiusagebudget()
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        cls.create_data = [
+            {
+                "name": "API Budget One",
+                "agent": agent.pk,
+                "period": AIUsageBudgetPeriodChoices.DAY,
+                "cost_limit": "10.0000",
+            },
+            {
+                "name": "API Budget Two",
+                "agent": agent.pk,
+                "period": AIUsageBudgetPeriodChoices.DAY,
+                "token_limit": 1000,
+            },
+            {
+                "name": "API Budget Three",
+                "agent": agent.pk,
+                "period": AIUsageBudgetPeriodChoices.DAY,
+                "cost_limit": "5.0000",
+            },
+        ]
+        cls.update_data = {"enabled": False}
 
 
 class AIAgentSkillAPIViewTest(APIViewTestCases.APIViewTestCase):

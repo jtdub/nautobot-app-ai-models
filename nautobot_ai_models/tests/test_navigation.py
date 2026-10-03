@@ -84,8 +84,8 @@ class AIToolsNavigationTest(TestCase):
         """`docs/dev/extending.md` tells another app to take 400 or higher. Leave that true."""
         self.assertLess(AGENTS_GROUP_WEIGHT, 400)
 
-    def test_agents_group_holds_the_six_operator_pages(self):
-        """The three binding models are reached from an agent's page, not from the menu.
+    def test_agents_group_holds_the_operator_pages(self):
+        """The binding models are reached from an agent's page, not from the menu.
 
         An approval is the exception. A reviewer looks for the queue of approvals, and does not
         know which binding to open first.
@@ -98,6 +98,7 @@ class AIToolsNavigationTest(TestCase):
             "aitoolapproval_list",
             "aiagentthread_list",
             "aiusagerecord_list",
+            "aiusagebudget_list",
         ):
             self.assertIn(reverse(f"plugins:nautobot_ai_models:{view}"), links)
         for view in ("aiagenttool_list", "aiagentsubagent_list", "aiagentskill_list", "aiagentfallback_list"):

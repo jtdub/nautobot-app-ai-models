@@ -1,6 +1,7 @@
 """Create fixtures for tests."""
 
 from datetime import timedelta
+from decimal import Decimal
 
 from django.utils import timezone
 from nautobot.extras.models import ExternalIntegration
@@ -26,12 +27,16 @@ from nautobot_ai_models.models import (
     AISkill,
     AITool,
     AIToolApproval,
+    AIUsageBudget,
     AIUsageRecord,
     MCPPrompt,
     MCPResource,
     MCPServer,
     MCPTool,
 )
+from nautobot.tenancy.models import Tenant
+
+from nautobot_ai_models.choices import AIUsageBudgetPeriodChoices
 from nautobot_ai_models.services import usage
 
 INTEGRATIONS = (
@@ -596,6 +601,43 @@ def create_aiusagerecord(**kwargs):
             unpriced,
             input_tokens=95,
             output_tokens=40,
+            **kwargs,
+        ),
+    ]
+
+
+def create_aiusagebudget(**kwargs):
+    """Return the suite's budgets, creating them if they do not exist.
+
+    Returns:
+        list: Three AIUsageBudget records, one per scope.
+    """
+    if AIUsageBudget.objects.exists():
+        return list(AIUsageBudget.objects.all())
+
+    agents = create_aiagent()
+    chat = AIModel.objects.filter(kind=AIModelKindChoices.CHAT).first()
+    tenant, _ = Tenant.objects.get_or_create(name="Budget Test Tenant")
+    return [
+        AIUsageBudget.objects.create(
+            name="Daily agent cost",
+            agent=agents[0],
+            period=AIUsageBudgetPeriodChoices.DAY,
+            cost_limit=Decimal("25.0000"),
+            **kwargs,
+        ),
+        AIUsageBudget.objects.create(
+            name="Weekly model tokens",
+            model=chat,
+            period=AIUsageBudgetPeriodChoices.WEEK,
+            token_limit=500_000,
+            **kwargs,
+        ),
+        AIUsageBudget.objects.create(
+            name="Daily tenant cost",
+            tenant=tenant,
+            period=AIUsageBudgetPeriodChoices.DAY,
+            cost_limit=Decimal("100.0000"),
             **kwargs,
         ),
     ]

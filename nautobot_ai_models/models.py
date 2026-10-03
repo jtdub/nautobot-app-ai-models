@@ -31,6 +31,7 @@ from nautobot_ai_models.choices import (
     AIAgentThreadStatusChoices,
     AIModelKindChoices,
     AIProviderTypeChoices,
+    AIUsageBudgetPeriodChoices,
     AIToolKindChoices,
     MCPTransportChoices,
     SubagentInputModeChoices,
@@ -2291,6 +2292,175 @@ class AIUsageRecord(BaseModel):
         """
         recorded = [cost for cost in (self.input_cost, self.output_cost) if cost is not None]
         return sum(recorded) if recorded else None
+
+
+_PERIOD_DAYS = {
+    AIUsageBudgetPeriodChoices.DAY: 1,
+    AIUsageBudgetPeriodChoices.WEEK: 7,
+    AIUsageBudgetPeriodChoices.MONTH: 31,
+}
+"""The longest calendar length of each period, for the retention check."""
+
+
+@extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")
+class AIUsageBudget(OrganizationalModel):  # pylint: disable=too-many-ancestors
+    """A permitted spend over one scope and one calendar period.
+
+    This app records the budget and reports the spend. The consuming app enforces it, the same way
+    it reads ``AIAgentTool.is_approved``: no budget here stops a call.
+    """
+
+    is_dynamic_group_associable_model = False
+
+    natural_key_field_names = ["name"]
+
+    name = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        unique=True,
+        help_text="The name the operator reads this budget by.",
+    )
+    description = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        blank=True,
+        help_text="What this limit is for, in a few words.",
+    )
+    enabled = models.BooleanField(
+        default=True,
+        help_text="A disabled budget is not offered to a consuming app.",
+    )
+    agent = models.ForeignKey(
+        to="nautobot_ai_models.AIAgent",
+        on_delete=models.PROTECT,
+        related_name="usage_budgets",
+        null=True,
+        blank=True,
+        verbose_name="AI Agent",
+        help_text="A budget scoped to one agent. Set exactly one of the agent, the model, or the tenant.",
+    )
+    model = models.ForeignKey(
+        to="nautobot_ai_models.AIModel",
+        on_delete=models.PROTECT,
+        related_name="usage_budgets",
+        null=True,
+        blank=True,
+        verbose_name="AI Model",
+        help_text="A budget scoped to one model. Set exactly one of the agent, the model, or the tenant.",
+    )
+    tenant = models.ForeignKey(
+        to="tenancy.Tenant",
+        on_delete=models.PROTECT,
+        related_name="usage_budgets",
+        null=True,
+        blank=True,
+        help_text="A budget scoped to one tenant. Set exactly one of the agent, the model, or the tenant.",
+    )
+    period = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        choices=AIUsageBudgetPeriodChoices,
+        help_text="The calendar period the spend is counted over, in the server time zone.",
+    )
+    cost_limit = models.DecimalField(
+        max_digits=COST_MAX_DIGITS,
+        decimal_places=COST_DECIMAL_PLACES,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(MIN_COST)],
+        verbose_name="Cost limit",
+        help_text=(
+            "The most the scope may spend in the period. Costs use each provider's billing "
+            "currency, so a tenant budget over two providers can add two currencies."
+        ),
+    )
+    token_limit = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Token limit",
+        help_text="The most tokens the scope may spend in the period.",
+    )
+
+    class Meta:
+        """Meta class."""
+
+        ordering = ["name"]
+        verbose_name = "AI Usage Budget"
+        verbose_name_plural = "AI Usage Budgets"
+
+    def __str__(self):
+        """Stringify instance."""
+        return self.name
+
+    def clean(self):
+        """Check that the budget names one scope and one limit, and fits the retention.
+
+        A period counts the records that survived pruning. Pruning deletes usage records after
+        ``checkpoint_retention_days``, so a period longer than the retention would count less
+        spend than occurred.
+
+        Raises:
+            ValidationError: The budget names no scope or more than one, has no limit, or its
+                period is longer than the checkpoint retention.
+        """
+        super().clean()
+
+        scopes = [field for field in ("agent", "model", "tenant") if getattr(self, f"{field}_id") is not None]
+        if len(scopes) != 1:
+            raise ValidationError("A budget has to name exactly one scope: an agent, a model, or a tenant.")
+
+        if self.cost_limit is None and self.token_limit is None:
+            raise ValidationError("A budget needs a cost limit or a token limit.")
+
+        if self.period:
+            from nautobot_ai_models.services.checkpoints import retention_days  # pylint: disable=import-outside-toplevel
+
+            days = _PERIOD_DAYS[self.period]
+            if retention_days() < days:
+                raise ValidationError(
+                    {
+                        "period": (
+                            f"A {self.get_period_display().lower()} budget needs a checkpoint "
+                            f"retention of at least {days} days, because pruning deletes the older "
+                            "usage records the budget counts."
+                        )
+                    }
+                )
+
+    @property
+    def spent_cost(self):
+        """What this budget's scope spent in the current period.
+
+        Returns:
+            Decimal: The summed cost, counting a missing cost as zero.
+        """
+        from nautobot_ai_models.services import usage  # pylint: disable=import-outside-toplevel
+
+        return usage.spend(self)[0]
+
+    @property
+    def spent_tokens(self):
+        """What this budget's scope spent in tokens in the current period.
+
+        Returns:
+            int: The summed tokens.
+        """
+        from nautobot_ai_models.services import usage  # pylint: disable=import-outside-toplevel
+
+        return usage.spend(self)[1]
+
+    @property
+    def is_exceeded(self):
+        """Whether any limit of this budget is met or passed.
+
+        Returns:
+            bool: True when the spend is at or over the cost limit or the token limit.
+        """
+        from nautobot_ai_models.services import usage  # pylint: disable=import-outside-toplevel
+
+        spent_cost, spent_tokens = usage.spend(self)
+        if self.cost_limit is not None and spent_cost >= self.cost_limit:
+            return True
+        if self.token_limit is not None and spent_tokens >= self.token_limit:
+            return True
+        return False
 
 
 @extras_features("custom_links", "custom_validators", "export_templates", "graphql", "webhooks")

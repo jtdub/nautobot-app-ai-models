@@ -136,3 +136,21 @@ class AIAgentThreadStatusChoices(ChoiceSet):
         (COMPLETED, "Completed"),
         (FAILED, "Failed"),
     )
+
+
+class AIUsageBudgetPeriodChoices(ChoiceSet):
+    """The calendar period a budget counts its spend over.
+
+    The periods are calendar periods in the server time zone: a day, a week (Monday to Sunday),
+    or a month.
+    """
+
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
+
+    CHOICES = (
+        (DAY, "Day"),
+        (WEEK, "Week"),
+        (MONTH, "Month"),
+    )

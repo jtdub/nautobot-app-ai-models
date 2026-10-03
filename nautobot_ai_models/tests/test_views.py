@@ -11,6 +11,7 @@ from nautobot_ai_models.choices import (
     AIAgentPatternChoices,
     AIModelKindChoices,
     AIProviderTypeChoices,
+    AIUsageBudgetPeriodChoices,
     MCPTransportChoices,
     SubagentInputModeChoices,
 )
@@ -318,6 +319,34 @@ class AISkillViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
             "name": "view_test_skill_two",
             "description": "another area of work",
             "body": "Call the other tool. Report what it said.",
+            "enabled": False,
+        }
+
+
+class AIUsageBudgetViewTest(ViewTestCases.OrganizationalObjectViewTestCase):
+    # pylint: disable=too-many-ancestors
+    """Test the AIUsageBudget views."""
+
+    model = models.AIUsageBudget
+    bulk_edit_data = {"enabled": False}
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create test data and the form payloads the generic view tests post."""
+        fixtures.create_aiusagebudget()
+        agent = spare_agent("View Test Budget Agent")
+        cls.form_data = {
+            "name": "view_test_budget",
+            "agent": agent.pk,
+            "period": AIUsageBudgetPeriodChoices.DAY,
+            "cost_limit": "10.0000",
+            "enabled": True,
+        }
+        cls.update_data = {
+            "name": "view_test_budget",
+            "agent": agent.pk,
+            "period": AIUsageBudgetPeriodChoices.DAY,
+            "cost_limit": "5.0000",
             "enabled": False,
         }
 
