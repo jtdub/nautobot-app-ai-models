@@ -30,6 +30,7 @@ from nautobot_ai_models.constants import (
     AI_TOOL_DEFINITION_FIELDS,
     AI_TOOL_DISCOVERY_STAMPS,
     AI_TOOL_SOURCE_FIELDS,
+    AI_USAGE_BUDGET_FIELDS,
     AI_USAGE_RECORD_FIELDS,
     MCP_PROMPT_DEFINITION_FIELDS,
     MCP_RESOURCE_DEFINITION_FIELDS,
@@ -666,6 +667,36 @@ class AISkillUIViewSet(NautobotUIViewSet):
                 select_related_fields=["agent", "skill"],
                 related_field_name="skill",
                 table_title="Agents that may load this",
+            ),
+        ],
+    )
+
+
+class AIUsageBudgetUIViewSet(NautobotUIViewSet):
+    """ViewSet for AI Usage Budget views."""
+
+    bulk_update_form_class = forms.AIUsageBudgetBulkEditForm
+    filterset_class = filters.AIUsageBudgetFilterSet
+    filterset_form_class = forms.AIUsageBudgetFilterForm
+    form_class = forms.AIUsageBudgetForm
+    lookup_field = "pk"
+    queryset = models.AIUsageBudget.objects.select_related("agent", "model", "tenant")
+    serializer_class = serializers.AIUsageBudgetSerializer
+    table_class = tables.AIUsageBudgetTable
+
+    object_detail_content = ObjectDetailContent(
+        panels=[
+            ObjectFieldsPanel(
+                weight=100,
+                section=SectionChoices.LEFT_HALF,
+                label="Budget",
+                fields=list(AI_USAGE_BUDGET_FIELDS),
+            ),
+            ObjectFieldsPanel(
+                weight=200,
+                section=SectionChoices.RIGHT_HALF,
+                label="This period",
+                fields=["spent_cost", "spent_tokens", "is_exceeded"],
             ),
         ],
     )

@@ -235,6 +235,23 @@ class AIAgentFallbackSerializer(NautobotModelSerializer):  # pylint: disable=too
         fields = "__all__"
 
 
+class AIUsageBudgetSerializer(NautobotModelSerializer):  # pylint: disable=too-many-ancestors
+    """AI Usage Budget Serializer.
+
+    The three spend figures are read-only, the same way an approval's digest is read-only.
+    """
+
+    spent_cost = drf_serializers.DecimalField(max_digits=12, decimal_places=4, read_only=True)
+    spent_tokens = drf_serializers.IntegerField(read_only=True)
+    is_exceeded = drf_serializers.BooleanField(read_only=True)
+
+    class Meta:
+        """Meta attributes."""
+
+        model = models.AIUsageBudget
+        fields = "__all__"
+
+
 class AIUsageRecordSerializer(ValidatedModelSerializer):  # pylint: disable=too-many-ancestors
     """AI Usage Record Serializer.
 

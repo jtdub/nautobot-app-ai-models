@@ -7,15 +7,20 @@ module's security properties live.
 
 # pylint: disable=protected-access
 
+from datetime import datetime
+from decimal import Decimal
+
 from django.test import override_settings
+from django.utils import timezone
 from nautobot.apps.choices import SecretsGroupAccessTypeChoices, SecretsGroupSecretTypeChoices
 from nautobot.apps.testing import TestCase
 from nautobot.extras.models import ExternalIntegration, Secret, SecretsGroup, SecretsGroupAssociation
+from nautobot.tenancy.models import Tenant
 
 from nautobot_ai_models import models
-from nautobot_ai_models.choices import MCPTransportChoices
+from nautobot_ai_models.choices import AIModelKindChoices, AIUsageBudgetPeriodChoices, MCPTransportChoices
 from nautobot_ai_models.secrets import read_secret
-from nautobot_ai_models.services import mcp
+from nautobot_ai_models.services import mcp, usage
 from nautobot_ai_models.services.exceptions import MCPCallError, MCPConfigurationError
 from nautobot_ai_models.tests import fixtures
 
@@ -718,3 +723,143 @@ class RedirectSafeClientTest(TestCase):
             """A client library that does not expose its redirect handling."""
 
         self.assertIsNone(mcp._redirect_safe_client_class(NoHook, self.HEADERS))
+
+
+class TestUsageBudget(TestCase):
+    """The budget service: period bounds, spend per scope, and the exceeded query."""
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create an agent, a priced model, and the threads usage records attach to."""
+        fixtures.create_aiagentthread()
+        cls.agent = models.AIAgent.objects.get(name="Test Supervisor")
+        cls.model = models.AIModel.objects.filter(kind=AIModelKindChoices.CHAT).first()
+        cls.model.input_cost_per_million = "10.0000"
+        cls.model.output_cost_per_million = "20.0000"
+        cls.model.validated_save()
+
+    @staticmethod
+    def _now():
+        """A fixed moment inside a day, a week, and a month."""
+        return timezone.make_aware(datetime(2026, 10, 15, 14, 30))
+
+    def test_period_start_returns_the_start_of_the_calendar_period(self):
+        """Day, week (Monday), and month boundaries, in the server time zone."""
+        now = self._now()
+        self.assertEqual(
+            usage.period_start(AIUsageBudgetPeriodChoices.DAY, now),
+            datetime(2026, 10, 15, 0, 0, tzinfo=now.tzinfo),
+        )
+        self.assertEqual(
+            usage.period_start(AIUsageBudgetPeriodChoices.WEEK, now),
+            datetime(2026, 10, 12, 0, 0, tzinfo=now.tzinfo),
+        )
+        self.assertEqual(
+            usage.period_start(AIUsageBudgetPeriodChoices.MONTH, now),
+            datetime(2026, 10, 1, 0, 0, tzinfo=now.tzinfo),
+        )
+
+    def test_spend_sums_the_agent_scope_since_the_period_start(self):
+        """A day budget for one agent counts only that agent's calls today."""
+        thread = models.AIAgentThread.objects.first()
+        now = self._now()
+        usage.record(thread, self.agent, self.model, input_tokens=100_000, output_tokens=50_000, recorded_at=now)
+        budget = models.AIUsageBudget.objects.create(
+            name="agent spend",
+            agent=self.agent,
+            period=AIUsageBudgetPeriodChoices.DAY,
+            cost_limit=Decimal("10.0000"),
+        )
+        spent_cost, spent_tokens = usage.spend(budget, now=now)
+        self.assertEqual(spent_cost, Decimal("2.0000"))
+        self.assertEqual(spent_tokens, 150_000)
+
+    def test_spend_sums_the_model_scope(self):
+        """A day budget for one model counts every call of that model."""
+        thread = models.AIAgentThread.objects.first()
+        now = self._now()
+        usage.record(thread, self.agent, self.model, input_tokens=50_000, output_tokens=0, recorded_at=now)
+        budget = models.AIUsageBudget.objects.create(
+            name="model spend",
+            model=self.model,
+            period=AIUsageBudgetPeriodChoices.DAY,
+            token_limit=100_000,
+        )
+        spent_cost, spent_tokens = usage.spend(budget, now=now)
+        self.assertEqual(spent_cost, Decimal("0.5000"))
+        self.assertEqual(spent_tokens, 50_000)
+
+    def test_spend_filters_the_tenant_scope_on_the_agent_tenant(self):
+        """A tenant budget counts the calls of the agents that carry that tenant."""
+        tenant = Tenant.objects.create(name="Budget Test Tenant")
+        self.agent.tenant = tenant
+        self.agent.save()
+        thread = models.AIAgentThread.objects.first()
+        now = self._now()
+        usage.record(thread, self.agent, self.model, input_tokens=10_000, output_tokens=0, recorded_at=now)
+        budget = models.AIUsageBudget.objects.create(
+            name="tenant spend",
+            tenant=tenant,
+            period=AIUsageBudgetPeriodChoices.DAY,
+            cost_limit=Decimal("1.0000"),
+        )
+        spent_cost, spent_tokens = usage.spend(budget, now=now)
+        self.assertEqual(spent_cost, Decimal("0.1000"))
+        self.assertEqual(spent_tokens, 10_000)
+
+    def test_spend_counts_a_null_cost_as_zero(self):
+        """An unpriced model spends no recorded money, only tokens."""
+        thread = models.AIAgentThread.objects.first()
+        now = self._now()
+        unpriced = models.AIModel.objects.filter(
+            kind=AIModelKindChoices.CHAT, input_cost_per_million__isnull=True
+        ).first()
+        usage.record(thread, self.agent, unpriced, input_tokens=1000, output_tokens=0, recorded_at=now)
+        budget = models.AIUsageBudget.objects.create(
+            name="null cost",
+            agent=self.agent,
+            period=AIUsageBudgetPeriodChoices.DAY,
+            token_limit=2000,
+        )
+        spent_cost, spent_tokens = usage.spend(budget, now=now)
+        self.assertEqual(spent_cost, Decimal("0.0000"))
+        self.assertEqual(spent_tokens, 1000)
+
+    def test_budgets_for_returns_the_agent_model_and_tenant_budgets(self):
+        """The consuming app sees every enabled budget a call could hit."""
+        tenant = Tenant.objects.create(name="Budgets Tenant")
+        self.agent.tenant = tenant
+        self.agent.save()
+        agent_budget = models.AIUsageBudget.objects.create(
+            name="for agent", agent=self.agent, period=AIUsageBudgetPeriodChoices.DAY, token_limit=100
+        )
+        model_budget = models.AIUsageBudget.objects.create(
+            name="for model", model=self.model, period=AIUsageBudgetPeriodChoices.DAY, token_limit=100
+        )
+        tenant_budget = models.AIUsageBudget.objects.create(
+            name="for tenant", tenant=tenant, period=AIUsageBudgetPeriodChoices.DAY, token_limit=100
+        )
+        disabled = models.AIUsageBudget.objects.create(
+            name="disabled", agent=self.agent, period=AIUsageBudgetPeriodChoices.DAY, token_limit=100, enabled=False
+        )
+        budgets = usage.budgets_for(self.agent, self.model)
+        self.assertEqual(set(budgets), {agent_budget, model_budget, tenant_budget})
+        self.assertNotIn(disabled, budgets)
+
+    def test_exceeded_budgets_includes_the_tenant_budget(self):
+        """A tenant at its cost limit is refused even when the model budget is not."""
+        tenant = Tenant.objects.create(name="Exceeded Tenant")
+        self.agent.tenant = tenant
+        self.agent.save()
+        thread = models.AIAgentThread.objects.first()
+        now = self._now()
+        usage.record(thread, self.agent, self.model, input_tokens=500_000, output_tokens=0, recorded_at=now)
+        tenant_budget = models.AIUsageBudget.objects.create(
+            name="exceeded tenant", tenant=tenant, period=AIUsageBudgetPeriodChoices.DAY, cost_limit=Decimal("1.0000")
+        )
+        model_budget = models.AIUsageBudget.objects.create(
+            name="quiet model", model=self.model, period=AIUsageBudgetPeriodChoices.DAY, cost_limit=Decimal("100.0000")
+        )
+        exceeded = usage.exceeded_budgets(self.agent, self.model, now=now)
+        self.assertIn(tenant_budget, exceeded)
+        self.assertNotIn(model_budget, exceeded)
