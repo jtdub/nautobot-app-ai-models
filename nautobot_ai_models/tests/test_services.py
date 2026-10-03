@@ -18,7 +18,7 @@ from nautobot.extras.models import ExternalIntegration, Secret, SecretsGroup, Se
 from nautobot.tenancy.models import Tenant
 
 from nautobot_ai_models import models
-from nautobot_ai_models.choices import AIUsageBudgetPeriodChoices, AIModelKindChoices, MCPTransportChoices
+from nautobot_ai_models.choices import AIModelKindChoices, AIUsageBudgetPeriodChoices, MCPTransportChoices
 from nautobot_ai_models.secrets import read_secret
 from nautobot_ai_models.services import mcp, usage
 from nautobot_ai_models.services.exceptions import MCPCallError, MCPConfigurationError

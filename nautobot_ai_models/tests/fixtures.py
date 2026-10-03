@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from django.utils import timezone
 from nautobot.extras.models import ExternalIntegration
+from nautobot.tenancy.models import Tenant
 
 from nautobot_ai_models.choices import (
     AIAgentPatternChoices,
@@ -12,6 +13,7 @@ from nautobot_ai_models.choices import (
     AIModelKindChoices,
     AIProviderTypeChoices,
     AIToolKindChoices,
+    AIUsageBudgetPeriodChoices,
     MCPTransportChoices,
     SubagentInputModeChoices,
 )
@@ -34,9 +36,6 @@ from nautobot_ai_models.models import (
     MCPServer,
     MCPTool,
 )
-from nautobot.tenancy.models import Tenant
-
-from nautobot_ai_models.choices import AIUsageBudgetPeriodChoices
 from nautobot_ai_models.services import usage
 
 INTEGRATIONS = (

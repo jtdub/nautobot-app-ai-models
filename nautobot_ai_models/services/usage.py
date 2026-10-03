@@ -8,6 +8,8 @@ price, and a cost worked out on read would quietly reprice last quarter. This mo
 out once, at the price of the day, and stores it.
 """
 
+# pylint: disable=cyclic-import
+
 import logging
 from datetime import datetime, time as dt_time, timedelta
 from decimal import Decimal

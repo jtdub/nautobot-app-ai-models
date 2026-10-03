@@ -7,6 +7,8 @@ The agent half of this module describes an agent. It does not run one. `services
 these rows into a LangChain agent, and even that module only builds the agent.
 """
 
+# pylint: disable=too-many-lines
+
 import re
 import uuid
 from decimal import Decimal
@@ -31,8 +33,8 @@ from nautobot_ai_models.choices import (
     AIAgentThreadStatusChoices,
     AIModelKindChoices,
     AIProviderTypeChoices,
-    AIUsageBudgetPeriodChoices,
     AIToolKindChoices,
+    AIUsageBudgetPeriodChoices,
     MCPTransportChoices,
     SubagentInputModeChoices,
 )
@@ -2410,7 +2412,9 @@ class AIUsageBudget(OrganizationalModel):  # pylint: disable=too-many-ancestors
             raise ValidationError("A budget needs a cost limit or a token limit.")
 
         if self.period:
-            from nautobot_ai_models.services.checkpoints import retention_days  # pylint: disable=import-outside-toplevel
+            from nautobot_ai_models.services.checkpoints import (  # pylint: disable=import-outside-toplevel
+                retention_days,
+            )
 
             days = _PERIOD_DAYS[self.period]
             if retention_days() < days:
