@@ -28,6 +28,7 @@ from nautobot_ai_models.constants import (
     AI_SKILL_FIELDS,
     AI_TOOL_APPROVAL_FIELDS,
     AI_TOOL_DEFINITION_FIELDS,
+    AI_USAGE_BUDGET_FIELDS,
     AI_USAGE_RECORD_FIELDS,
     MCP_PROMPT_DEFINITION_FIELDS,
     MCP_RESOURCE_DEFINITION_FIELDS,
@@ -386,6 +387,32 @@ class AISkillFilterSet(NameSearchFilterSet, NautobotFilterSet):  # pylint: disab
 
         model = models.AISkill
         fields = list(AI_SKILL_FIELDS)  # pylint: disable=nb-use-fields-all
+
+
+class AIUsageBudgetFilterSet(NameSearchFilterSet, NautobotFilterSet):  # pylint: disable=too-many-ancestors
+    """Filter for AIUsageBudget."""
+
+    agent = NaturalKeyOrPKMultipleChoiceFilter(
+        queryset=models.AIAgent.objects.all(),
+        to_field_name="name",
+        label="AI Agent (name or ID)",
+    )
+    model = NaturalKeyOrPKMultipleChoiceFilter(
+        queryset=models.AIModel.objects.all(),
+        to_field_name="name",
+        label="AI Model (name or ID)",
+    )
+    tenant = NaturalKeyOrPKMultipleChoiceFilter(
+        queryset=Tenant.objects.all(),
+        to_field_name="name",
+        label="Tenant (name or ID)",
+    )
+
+    class Meta:
+        """Meta attributes for filter."""
+
+        model = models.AIUsageBudget
+        fields = list(AI_USAGE_BUDGET_FIELDS)  # pylint: disable=nb-use-fields-all
 
 
 class AIAgentSkillFilterSet(NautobotFilterSet):  # pylint: disable=too-many-ancestors
