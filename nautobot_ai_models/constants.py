@@ -265,4 +265,16 @@ AI_USAGE_RECORD_FIELDS = (
     "output_cost",
 )
 
+AI_USAGE_BUDGET_FIELDS = (
+    "name",
+    "description",
+    "enabled",
+    "agent",
+    "model",
+    "tenant",
+    "period",
+    "cost_limit",
+    "token_limit",
+)
+
 TOKENS_PER_MILLION = 1_000_000

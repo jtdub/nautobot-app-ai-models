@@ -16,6 +16,8 @@ NOTE: This module cannot trim a thread to its newest checkpoint. `checkpoint_blo
 module keeps a thread whole or deletes it whole.
 """
 
+# pylint: disable=cyclic-import
+
 import logging
 
 from django.db import connection

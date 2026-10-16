@@ -21,6 +21,7 @@ router.register("ai-agent-skills", views.AIAgentSkillViewSet)
 router.register("ai-agent-fallbacks", views.AIAgentFallbackViewSet)
 router.register("ai-agent-threads", views.AIAgentThreadViewSet)
 router.register("ai-usage-records", views.AIUsageRecordViewSet)
+router.register("ai-usage-budgets", views.AIUsageBudgetViewSet)
 
 app_name = "nautobot_ai_models-api"
 urlpatterns = router.urls

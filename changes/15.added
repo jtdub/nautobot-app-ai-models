@@ -1,0 +1,1 @@
+Added AI Usage Budget: a permitted spend for one agent, model, or tenant over a day, week, or month. The app reports the spend for the current period beside the limit, and a consuming app can read `exceeded_budgets()` before a call.

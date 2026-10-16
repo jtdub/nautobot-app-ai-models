@@ -19,6 +19,7 @@ from nautobot_ai_models.constants import (
     AI_TOOL_APPROVAL_FIELDS,
     AI_TOOL_DEFINITION_FIELDS,
     AI_TOOL_FIELDS,
+    AI_USAGE_BUDGET_FIELDS,
     AI_USAGE_RECORD_FIELDS,
     MCP_PROMPT_DEFINITION_FIELDS,
     MCP_RESOURCE_DEFINITION_FIELDS,
@@ -343,6 +344,26 @@ class AISkillTable(BaseTable):
         model = models.AISkill
         fields = ("pk", *AI_SKILL_FIELDS, "agent_count", "actions")
         default_columns = ("pk", "name", "description", "enabled", "agent_count", "actions")
+
+
+class AIUsageBudgetTable(BaseTable):
+    # pylint: disable=R0903
+    """Table for the AI Usage Budget list view."""
+
+    pk = ToggleColumn()
+    name = tables.Column(linkify=True)
+    enabled = BooleanColumn()
+    period = tables.Column()
+    cost_limit = tables.Column()
+    token_limit = tables.Column()
+    actions = ButtonsColumn(models.AIUsageBudget, pk_field="pk")
+
+    class Meta(BaseTable.Meta):
+        """Meta attributes."""
+
+        model = models.AIUsageBudget
+        fields = ("pk", *AI_USAGE_BUDGET_FIELDS, "actions")
+        default_columns = ("pk", "name", "enabled", "period", "cost_limit", "token_limit", "actions")
 
 
 class AIAgentSkillTable(BaseTable):

@@ -484,6 +484,27 @@ class AISkillFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=
         )
 
 
+class AIUsageBudgetFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=too-many-ancestors
+    """AIUsageBudget Filter Test Case."""
+
+    queryset = models.AIUsageBudget.objects.all()
+    filterset = filters.AIUsageBudgetFilterSet
+    generic_filter_tests = (("id",), ("created",), ("last_updated",), ("name",))
+
+    @classmethod
+    def setUpTestData(cls):
+        """Set up test data for the AIUsageBudget model."""
+        fixtures.create_aiusagebudget()
+
+    def test_filtering_by_agent(self):
+        """Which budgets this agent is on the hook for."""
+        agent = models.AIAgent.objects.get(name="Test Supervisor")
+        self.assertEqual(
+            self.filterset({"agent": [agent.name]}, self.queryset).qs.count(),
+            self.queryset.filter(agent=agent).count(),
+        )
+
+
 class AIAgentSkillFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: disable=too-many-ancestors
     """AIAgentSkill Filter Test Case."""
 

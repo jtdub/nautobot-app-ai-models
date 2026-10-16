@@ -36,6 +36,7 @@ class AIModelsConfig(NautobotAppConfig):
         "aiagent",
         "aitool",
         "aiskill",
+        "aiusagebudget",
     ]
 
     nautobot_edition = "community"

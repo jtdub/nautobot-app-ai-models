@@ -130,6 +130,7 @@ nav:
           - AI Agent Fallback: "models/aiagentfallback.md"
           - AI Agent Thread: "models/aiagentthread.md"
           - AI Usage Record: "models/aiusagerecord.md"
+          - AI Usage Budget: "models/aiusagebudget.md"
   - Administrator Guide:
       - Install and Configure: "admin/install.md"
       - Upgrade: "admin/upgrade.md"

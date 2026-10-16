@@ -125,6 +125,14 @@ class AIAgentFallbackViewSet(NautobotModelViewSet):  # pylint: disable=too-many-
     filterset_class = filters.AIAgentFallbackFilterSet
 
 
+class AIUsageBudgetViewSet(NautobotModelViewSet):  # pylint: disable=too-many-ancestors
+    """AI Usage Budget viewset."""
+
+    queryset = models.AIUsageBudget.objects.select_related("agent", "model", "tenant")
+    serializer_class = serializers.AIUsageBudgetSerializer
+    filterset_class = filters.AIUsageBudgetFilterSet
+
+
 class AIUsageRecordViewSet(  # pylint: disable=too-many-ancestors
     mixins.CreateModelMixin,
     mixins.ListModelMixin,

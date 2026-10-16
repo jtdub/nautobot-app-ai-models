@@ -55,6 +55,7 @@ router.register("ai-agent-skills", views.AIAgentSkillUIViewSet)
 router.register("ai-agent-fallbacks", views.AIAgentFallbackUIViewSet)
 router.register("ai-agent-threads", views.AIAgentThreadUIViewSet)
 router.register("ai-usage-records", views.AIUsageRecordUIViewSet)
+router.register("ai-usage-budgets", views.AIUsageBudgetUIViewSet)
 
 
 urlpatterns = [
